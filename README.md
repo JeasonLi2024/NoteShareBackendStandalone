@@ -28,6 +28,11 @@ python manage.py makemigrations (app_name)
 python manage.py migrate (app_name)
 ```
 
+#### 创建管理员用户
+```shell
+python manage.py createsuperuser
+```
+
 #### 运行项目
 ```shell
 python manage.py runserver
@@ -39,7 +44,6 @@ git pull origin master
 ```
 
 ## 提交项目
-
 #### 生成依赖文件
 ```shell
 pip freeze > requirements.txt
@@ -52,5 +56,21 @@ git commit -m "commit message"
 git push origin master
 ```
 
-
-
+## 更新日志
+2025-03-07 wjt
+1. 搭建项目框架：
+- 添加django-cors-headers：支持跨端口请求
+- 添加djangorestframework：用于构建api 
+- 添加django_filter：用于过滤查询
+- 添加drf_yasg：用于自动生成接口文档
+    - 在路由里查看路径，访问路径即可查看接口文档
+- 添加mysqlclient：用于连接数据库
+- 添加python-dotenv：用于读取.env文件
+- 添加pipdeptree：用于查看依赖树
+- 配置MySQL数据库
+2. 创建user应用：
+- 创建user模型（数据表）
+- 创建user序列化器
+- 创建user视图
+- 创建user路由
+- 创建后台管理admin

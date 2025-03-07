@@ -11,8 +11,6 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 from pathlib import Path
-from dotenv import load_dotenv
-import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -29,6 +27,13 @@ DEBUG = True
 
 ALLOWED_HOSTS = []
 
+# 读取.env环境变量
+import os
+from dotenv import load_dotenv
+# 加载环境变量
+load_dotenv()
+# 获取环境变量
+DB_PASSWORD = os.getenv('DB_PASSWORD')
 
 # Application definition
 
@@ -42,6 +47,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'rest_framework',
     'django_filters',
+    'drf_yasg',
     'user',
 ]
 
@@ -79,19 +85,29 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "NoteShareBackend.wsgi.application"
 
+# REST_FRAMEWORK增加全局过滤配置
+REST_FRAMEWORK = {
+    'DEFAULT_FILTER_BACKENDS': [
+     'django_filters.rest_framework.DjangoFilterBackend',
+     'rest_framework.filters.SearchFilter',
+    ],
+    # 设置分页
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 10,
+}
+# 如果可以实现模糊查询，则以下语句可省略
+FILTERS_DEFAULT_LOOKUP_EXPR = 'icontains'
 
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-load_dotenv()
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.getenv('NAME'),
-        'USER': os.getenv('USER'),
-        'PASSWORD': os.getenv('PASSWORD'),
-        'HOST': os.getenv('HOST'),
+        'NAME': 'note_share',
+        'USER': 'root',
+        'PASSWORD': DB_PASSWORD,
+        'HOST': '127.0.0.1',
     }
 }
 
