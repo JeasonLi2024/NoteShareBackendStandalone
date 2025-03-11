@@ -19,7 +19,7 @@ from django.contrib import admin
 from django.urls import path,include
 from django.conf import settings
 from django.conf.urls.static import static
-from user.views import UserViewSet, RegisterView, LoginView
+from user.views import UserViewSet, RegisterView, LoginView, UserUpdateView
 from rest_framework.routers import SimpleRouter
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
@@ -35,6 +35,7 @@ urlpatterns = [
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path("admin/", admin.site.urls),
     path('user/', include('user.urls')),
+    path('user/update/', UserUpdateView.as_view(), name='user-update'),
     path('user/<int:pk>/update-avatar/', UserViewSet.as_view({'post': 'update_avatar'})),
 ]
 

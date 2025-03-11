@@ -1,20 +1,23 @@
 from rest_framework import serializers
 from .models import User
 from django.contrib.auth import authenticate
+from django.contrib.auth import get_user_model
 
+UserModel = get_user_model()
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
-        model = User
+        model = UserModel
         fields = (
             'id', 'username', 'email', 'avatar', 'phone', 'created_at', 'last_login',
             'school', 'major', 'grade'  # 添加新的字段
         )# 不返回密码字段，保护用户隐私
+        read_only_fields = ('created_at', 'last_login')
 
 class UserCreateSerializer(serializers.ModelSerializer):
     avatar = serializers.ImageField(required=False)
 
     class Meta:
-        model = User
+        model = UserModel
         fields = [
             'id', 'username', 'password', 'email', 'avatar', 'phone',
             'school', 'major', 'grade'  # 添加新的字段
@@ -29,16 +32,18 @@ class UserCreateSerializer(serializers.ModelSerializer):
         major = validated_data.pop('major', None)
         grade = validated_data.pop('grade', None)
 
-        user = User.objects.create_user(
+        user = UserModel.objects.create_user(
             username=validated_data['username'],
             password=validated_data['password'],
-            email=validated_data.get('email'),
+            email=validated_data['email'],
             phone=validated_data['phone'],
             avatar=avatar,
             school=school,
             major=major,
             grade=grade,
         )
+        user.set_password(validated_data['password'])
+        user.save()
         return user
 
 class LoginSerializer(serializers.Serializer):
@@ -50,3 +55,35 @@ class LoginSerializer(serializers.Serializer):
         if user and user.is_active:
             return user
         raise serializers.ValidationError("Invalid credentials")
+
+# class LoginSerializer(serializers.Serializer):
+#     username = serializers.CharField()
+#     password = serializers.CharField()
+#
+#     def validate(self, data):
+#         username = data.get('username')
+#         password = data.get('password')
+#
+#         if username and password:
+#             user = authenticate(username=username, password=password)
+#             if user:
+#                 if user.is_active:
+#                     data['user'] = user
+#                 else:
+#                     raise serializers.ValidationError("User account is disabled.")
+#             else:
+#                 # Check if user exists but password is invalid
+#                 user = User.objects.filter(username=username).first()
+#                 if user:
+#                     if not user.check_password(password):
+#                         logger.warning(f"Invalid password for user {username}")
+#                         raise serializers.ValidationError("Invalid password.")
+#                     else:
+#                         raise serializers.ValidationError("Invalid credentials.")
+#                 else:
+#                     logger.warning(f"User {username} does not exist")
+#                     raise serializers.ValidationError("User does not exist.")
+#         else:
+#             raise serializers.ValidationError("Must include 'username' and 'password'.")
+#
+#         return data
