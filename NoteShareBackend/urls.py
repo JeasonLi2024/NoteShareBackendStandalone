@@ -19,12 +19,20 @@ from django.contrib import admin
 from django.urls import path,include
 from django.conf import settings
 from django.conf.urls.static import static
-from user.views import UserViewSet
+from user.views import UserViewSet, RegisterView, LoginView
 from rest_framework.routers import SimpleRouter
+from rest_framework_simplejwt.views import (
+    TokenObtainPairView,
+    TokenRefreshView,
+)
 
 router = SimpleRouter()
 router.register(r'user', UserViewSet, basename='user')
 urlpatterns = [
+    path('register/', RegisterView.as_view(), name='register'),
+    path('login/', LoginView.as_view(), name='login'),
+    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path("admin/", admin.site.urls),
     path('user/', include('user.urls')),
     path('user/<int:pk>/update-avatar/', UserViewSet.as_view({'post': 'update_avatar'})),

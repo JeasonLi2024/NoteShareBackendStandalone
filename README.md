@@ -42,6 +42,11 @@ python manage.py runserver
 ```shell
 git pull origin master
 ```
+## 分支合并
+```shell
+git checkout B #首先切换到分支B
+git merge A    #将分支A的更改合并到分支B上
+```
 
 ## 提交项目
 #### 生成依赖文件
@@ -74,3 +79,20 @@ git push origin master
 - 创建user视图
 - 创建user路由
 - 创建后台管理admin
+
+2025-03-08 lwr（新增头像上传模块）
+1. 更新user模型
+- 新增用户头像，电子邮箱，创建时间和用户登陆时间
+- AbstractBaseUser 是一个抽象模型类，提供了实现自定义用户模型所需的最少属性和方法。它允许开发者完全控制用户模型的定义，而不必受限于 Django 默认的 User 模型。
+- BaseUserManager 是一个帮助类，提供了创建用户和超级用户（管理员）的工具方法，同时也允许开发者自定义用户查询集和创建用户的方式。
+- PermissionsMixin 则包含了实现 Django 权限系统所需的方法和字段。
+2. 更新user序列化器
+- 新增一个 create 方法，用于创建一个新的用户实例同时处理头像上传。
+3. 更新user视图
+- 新增用户查询集： 定义一个get_queryset方法，用于根据当前用户的角色返回不同用户集合。
+普通用户只能查看自己的信息，管理员可以查看所有用户。
+- 新增用户名检索自定义行为： 重写 get_object 方法，使得可以通过用户名获取用户实例
+- 新增 update_avatar 方法，处理用户头像的更新操作。
+4. 更新user路由
+- 新增处理用户头像更新的请求
+5. 编写头像上传test.py文件，测试头像上传功能

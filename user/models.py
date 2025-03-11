@@ -46,6 +46,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     created_at = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
     last_login = models.DateTimeField(null=True, blank=True, verbose_name='最后登录时间')
 
+    school = models.CharField(max_length=100, verbose_name='学校', null=True, blank=True)
+    major = models.CharField(max_length=100, verbose_name='专业', null=True, blank=True)
+    grade = models.CharField(max_length=100, verbose_name='年级', null=True, blank=True)
+
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
 
