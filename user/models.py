@@ -1,27 +1,6 @@
-# user/models.py
-# from django.db import models
-# from django.utils import timezone
-#
-#
-# class User(models.Model):
-#     username = models.CharField(max_length=10, unique=True)
-#     password = models.CharField(max_length=100)
-#     phone = models.CharField(max_length=11, unique=True, verbose_name='手机号')
-#     avatar = models.ImageField(upload_to='avatars/', null=True, blank=True, verbose_name='头像')
-#     email = models.EmailField(unique=True, verbose_name='电子邮件', null=True, blank=True)
-#     created_at = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
-#     last_login = models.DateTimeField(null=True, blank=True, verbose_name='最后登录时间')
-#     class Meta:
-#         db_table = 'user'
-#         verbose_name = '用户'
-#         verbose_name_plural = verbose_name
-#
-#     def __str__(self):
-#         return self.username
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 from django.utils import timezone
-
 
 class UserManager(BaseUserManager):
     def create_user(self, username, password=None, **extra_fields):
@@ -39,6 +18,7 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractBaseUser, PermissionsMixin):
+
     username = models.CharField(max_length=10, unique=True)
     phone = models.CharField(max_length=11, unique=True, verbose_name='手机号')
     avatar = models.ImageField(upload_to='avatars/', null=True, blank=True, verbose_name='头像')

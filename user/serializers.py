@@ -55,35 +55,3 @@ class LoginSerializer(serializers.Serializer):
         if user and user.is_active:
             return user
         raise serializers.ValidationError("Invalid credentials")
-
-# class LoginSerializer(serializers.Serializer):
-#     username = serializers.CharField()
-#     password = serializers.CharField()
-#
-#     def validate(self, data):
-#         username = data.get('username')
-#         password = data.get('password')
-#
-#         if username and password:
-#             user = authenticate(username=username, password=password)
-#             if user:
-#                 if user.is_active:
-#                     data['user'] = user
-#                 else:
-#                     raise serializers.ValidationError("User account is disabled.")
-#             else:
-#                 # Check if user exists but password is invalid
-#                 user = User.objects.filter(username=username).first()
-#                 if user:
-#                     if not user.check_password(password):
-#                         logger.warning(f"Invalid password for user {username}")
-#                         raise serializers.ValidationError("Invalid password.")
-#                     else:
-#                         raise serializers.ValidationError("Invalid credentials.")
-#                 else:
-#                     logger.warning(f"User {username} does not exist")
-#                     raise serializers.ValidationError("User does not exist.")
-#         else:
-#             raise serializers.ValidationError("Must include 'username' and 'password'.")
-#
-#         return data
