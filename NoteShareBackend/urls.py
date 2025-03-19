@@ -27,7 +27,7 @@ from rest_framework_simplejwt.views import (
 router = SimpleRouter()
 router.register(r'user', UserViewSet, basename='user')
 urlpatterns = [
-    path('register/send-code/', SendVerificationCodeView.as_view(), name='send-verification-code'),
+    path('send-code/', SendVerificationCodeView.as_view(), name='send-verification-code'),
     path('register/', RegisterView.as_view(), name='register'),
     path('login/', LoginView.as_view(), name='login'),
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
