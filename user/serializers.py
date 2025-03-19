@@ -15,12 +15,12 @@ class UserSerializer(serializers.ModelSerializer):
 
 class UserCreateSerializer(serializers.ModelSerializer):
     avatar = serializers.ImageField(required=False)
-
+    verification_code = serializers.CharField(write_only=True)
     class Meta:
         model = UserModel
         fields = [
             'id', 'username', 'password', 'email', 'avatar', 'phone',
-            'school', 'major', 'grade'  # 添加新的字段
+            'school', 'major', 'grade', 'verification_code'  # 添加新的字段
         ]
         extra_kwargs = {
             'password': {'write_only': True}  # 密码只写不读
@@ -31,7 +31,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
         school = validated_data.pop('school', None)
         major = validated_data.pop('major', None)
         grade = validated_data.pop('grade', None)
-
+        validated_data.pop('verification_code')
         user = UserModel.objects.create_user(
             username=validated_data['username'],
             password=validated_data['password'],
