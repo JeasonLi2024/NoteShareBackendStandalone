@@ -188,11 +188,26 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+# DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+# EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+# EMAIL_HOST = 'smtp.gmail.com'
+# EMAIL_PORT = 587
+# EMAIL_USE_TLS = True
+# EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
+# EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+# DEFAULT_FROM_EMAIL = os.getenv('EMAIL_HOST_USER')
+
+# EMAIL信息设置
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
-EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
-DEFAULT_FROM_EMAIL = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST = 'smtp.qq.com'  # QQ 邮箱的 SMTP 服务器
+EMAIL_PORT = 465  # QQ 邮箱的 SMTP 端口，使用 SSL
+EMAIL_USE_SSL = True  # 使用 SSL 加密
+EMAIL_HOST_USER = os.getenv('QQ_EMAIL')  # 你的 QQ 邮箱地址
+EMAIL_HOST_PASSWORD = os.getenv('QQ_PASSWORD')  # 你的 QQ 邮箱密码或授权码
+DEFAULT_FROM_EMAIL = os.getenv('QQ_EMAIL')  # 默认发件人
+
+#session设置
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
+SESSION_COOKIE_NAME = 'sessionid'
+SESSION_COOKIE_SECURE = True  # if using HTTPS
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True

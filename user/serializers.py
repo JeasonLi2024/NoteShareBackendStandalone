@@ -14,7 +14,7 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ('created_at', 'last_login')
 
 class UserCreateSerializer(serializers.ModelSerializer):
-    avatar = serializers.ImageField(required=False)
+    avatar = serializers.ImageField(required=False, allow_null=True)
     verification_code = serializers.CharField(write_only=True)
     class Meta:
         model = UserModel

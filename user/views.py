@@ -13,6 +13,7 @@ from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.conf import settings
 import random
+import datetime
 
 
 
@@ -20,6 +21,8 @@ class SendVerificationCodeView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        if not request.session.session_key:
+            request.session.create()
         email = request.data.get('email')
         if not email:
             return Response({
@@ -33,6 +36,7 @@ class SendVerificationCodeView(APIView):
         # Store the code in session
         request.session['verification_code'] = code
         request.session.set_expiry(300)  # expire in 5 minutes
+
 
         # Send email
         subject = 'Verification Code'
