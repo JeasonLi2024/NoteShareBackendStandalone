@@ -2,20 +2,68 @@ import os
 from rest_framework import generics, permissions, status
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from .models import Note, Comment, Like
 from .serializers import NoteSerializer, CommentSerializer
 from django.db.models import Q
 from django.http import HttpResponse, Http404
 from django.shortcuts import get_object_or_404
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 import fitz  # PyMuPDF
 import docx
 import markdown
 
-class NoteListCreateView(generics.ListCreateAPIView):
-    queryset = Note.objects.filter(is_private=False)
-    serializer_class = NoteSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
+# class AdminNoteListView(generics.ListAPIView):
+#     queryset = Note.objects.filter(is_private=False)
+#     serializer_class = NoteSerializer
+#     permission_classes = [IsAdminUser]
+
+
+# class AdminDeleteNoteView(generics.DestroyAPIView):
+#     queryset = Note.objects.all()
+#     serializer_class = NoteSerializer
+#     permission_classes = [IsAdminUser]
+#
+#     def destroy(self, request, *args, **kwargs):
+#         instance = self.get_object()
+#         author = instance.author  # 使用 author 字段指向笔记所属用户
+#         email = author.email  # 获取用户的邮箱
+#         # 发送邮件通知用户
+#         subject = '您的笔记已被删除'
+#         message = '您的笔记不符合规范已被管理员删除。'
+#         from_email = settings.DEFAULT_FROM_EMAIL
+#         recipient_list = [email]
+#         send_mail(subject, message, from_email, recipient_list)
+#
+#         # 删除笔记
+#         self.perform_destroy(instance)
+#
+#         return Response({
+#             "code": status.HTTP_204_NO_CONTENT,
+#             "message": "笔记已删除，并已通知用户",
+#             "data": {}
+#         }, status=status.HTTP_204_NO_CONTENT)
+
+class NoteListView(APIView):
+    serializer_class = NoteSerializer
+    permission_classes = [AllowAny]
+    def get(self, request):
+        # 获取所有笔记
+        notes = Note.objects.all()
+        serializer = NoteSerializer(notes, many=True)
+        return Response({
+            "code": status.HTTP_200_OK,
+            "message": "success",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+
+class NoteCreateView(generics.ListCreateAPIView):
+    queryset = Note.objects.all()
+    serializer_class = NoteSerializer
+    # permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
 

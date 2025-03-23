@@ -31,7 +31,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 router = SimpleRouter()
-router.register(r'user', UserViewSet, basename='user')
+# router.register(r'user', UserViewSet, basename='user')
 urlpatterns = [
     path('send-code/', SendVerificationCodeView.as_view(), name='send-verification-code'),
     path('register/', RegisterView.as_view(), name='register'),
@@ -40,7 +40,7 @@ urlpatterns = [
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path("admin/", admin.site.urls),
     path('user/', include('user.urls')),
-    path('', include('notesmanage.urls')),
+    path('notesmanage/', include('notesmanage.urls')),
     path('user/update/', UserUpdateView.as_view(), name='user-update'),
     path('user/<int:pk>/update-avatar/', UserViewSet.as_view({'post': 'update_avatar'})),
 ]
