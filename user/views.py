@@ -13,16 +13,15 @@ from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.conf import settings
 import random
-import datetime
+from django.core.cache import cache
 
 
+User = get_user_model()
 
 class SendVerificationCodeView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        if not request.session.session_key:
-            request.session.create()
         email = request.data.get('email')
         if not email:
             return Response({
@@ -33,10 +32,8 @@ class SendVerificationCodeView(APIView):
 
         code = str(random.randint(100000, 999999))
 
-        # Store the code in session
-        request.session['verification_code'] = code
-        request.session.set_expiry(300)  # expire in 5 minutes
-
+        # Store the code in Redis with a 5-minute expiration
+        cache.set(f'verification_code:{email}', code, timeout=600)
 
         # Send email
         subject = 'Verification Code'
@@ -51,6 +48,7 @@ class SendVerificationCodeView(APIView):
             "data": {}
         }, status=status.HTTP_200_OK)
 
+
 class RegisterView(generics.CreateAPIView):
     queryset = get_user_model().objects.all()
     serializer_class = UserCreateSerializer
@@ -58,7 +56,6 @@ class RegisterView(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         verification_code = request.data.get('verification_code')
-        stored_code = request.session.get('verification_code')
         email = request.data.get('email')
 
         if not email or not verification_code:
@@ -68,7 +65,10 @@ class RegisterView(generics.CreateAPIView):
                 "data": {}
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        if verification_code != stored_code:
+        # Get the stored code from Redis
+        stored_code = cache.get(f'verification_code:{email}')
+
+        if not stored_code or verification_code != stored_code:
             return Response({
                 "code": status.HTTP_400_BAD_REQUEST,
                 "message": "Invalid verification code",

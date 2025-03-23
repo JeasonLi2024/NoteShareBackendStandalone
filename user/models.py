@@ -1,6 +1,7 @@
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 from django.utils import timezone
+import random
 
 class UserManager(BaseUserManager):
     def create_user(self, username, password=None, **extra_fields):
@@ -21,7 +22,16 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     username = models.CharField(max_length=10, unique=True)
     phone = models.CharField(max_length=11, unique=True, verbose_name='手机号')
+
     avatar = models.ImageField(upload_to='avatars/', null=True, blank=True, verbose_name='头像')
+    def save(self, *args, **kwargs):
+        if not self.avatar:
+            # 选择一个默认头像
+            default_avatars = ['defaults/default1.jpg', 'defaults/default2.jpg', 'defaults/default3.jpg', 'defaults/default4.jpg']
+            default_avatar_path = f'avatars/{random.choice(default_avatars)}'
+            self.avatar = default_avatar_path
+        super().save(*args, **kwargs)
+
     email = models.EmailField(unique=True, verbose_name='电子邮件', null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
     last_login = models.DateTimeField(null=True, blank=True, verbose_name='最后登录时间')

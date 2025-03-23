@@ -17,12 +17,18 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import path,include
-from user.views import UserViewSet, RegisterView, LoginView, UserUpdateView, SendVerificationCodeView
+from user.views import (
+    UserViewSet, RegisterView, LoginView,
+    UserUpdateView, SendVerificationCodeView
+)
+
 from rest_framework.routers import SimpleRouter
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
 )
+from django.conf import settings
+from django.conf.urls.static import static
 
 router = SimpleRouter()
 router.register(r'user', UserViewSet, basename='user')
@@ -34,7 +40,12 @@ urlpatterns = [
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path("admin/", admin.site.urls),
     path('user/', include('user.urls')),
+    path('', include('notesmanage.urls')),
     path('user/update/', UserUpdateView.as_view(), name='user-update'),
     path('user/<int:pk>/update-avatar/', UserViewSet.as_view({'post': 'update_avatar'})),
 ]
+
+
+if settings.DEBUG:
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 
