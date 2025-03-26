@@ -8,7 +8,8 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import PermissionDenied, NotFound
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.tokens import RefreshToken, OutstandingToken, BlacklistedToken
+from django.contrib.auth.hashers import make_password
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.conf import settings
@@ -121,6 +122,26 @@ class UserUpdateView(RetrieveUpdateAPIView):
         return self.request.user
 
     def update(self, request, *args, **kwargs):
+        # 检查请求中是否包含了新密码
+        if 'password' in request.data:
+            # 获取当前用户
+            user = self.get_object()
+
+            # 更新用户密码
+            user.set_password(request.data['password'])
+            user.save()
+
+            # 黑名单所有未过期的Token
+            for token in OutstandingToken.objects.filter(user=user):
+                BlacklistedToken.objects.get_or_create(token=token)
+
+            # 返回需要重新登录的信息
+            return Response({
+                "code": status.HTTP_200_OK,
+                "message": "Password updated, please log in again.",
+                "data": None
+            }, status=status.HTTP_200_OK)
+
         response = super().update(request, *args, **kwargs)
         if response.status_code == status.HTTP_200_OK:
             return Response({

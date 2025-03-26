@@ -61,6 +61,21 @@ git commit -m "commit message"
 git push origin master
 ```
 
+#### 启动 Redis （cmd管理员运行）
+```cmd
+cd /d d:\redis
+Redis-server.exe redis.windows.conf #启动redis服务
+redis-cli.exe #另开一个cmd输入指令打开Redis客户端
+ping #在命令中输入ping命令来检测redis服务器与redis客户端的连通性，返回PONG则说明连接成功了。
+```
+
+#### 提交项目celery 启动和异步任务的运行
+```shell
+celery -A NoteShareBackend worker --loglevel=info 
+celery -A NoteShareBackend beat --loglevel=info
+```
+
+
 ## 更新日志
 2025-03-07 wjt
 1. 搭建项目框架：

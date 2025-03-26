@@ -13,6 +13,9 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 from pathlib import Path
 import os
 from datetime import timedelta
+# 读取.env环境变量
+from dotenv import load_dotenv
+from celery import Celery
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -29,9 +32,7 @@ DEBUG = True
 
 ALLOWED_HOSTS = []
 
-# 读取.env环境变量
-import os
-from dotenv import load_dotenv
+
 # 加载环境变量
 load_dotenv()
 # 获取环境变量
@@ -46,13 +47,12 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    'django_ckeditor_5',
     'corsheaders',
     'rest_framework',
     'rest_framework_simplejwt',  # 添加 simplejwt 应用
     'django_filters',
     'drf_yasg',
-    'ckeditor',
-    'ckeditor_uploader',
     'user',
     'notesmanage',
 
@@ -77,7 +77,7 @@ ROOT_URLCONF = "NoteShareBackend.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [os.path.join(BASE_DIR, 'templates')],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -224,25 +224,127 @@ SESSION_COOKIE_SECURE = True  # if using HTTPS
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 # CKEditor配置
-CKEDITOR_UPLOAD_PATH = 'uploads/'
-CKEDITOR_IMAGE_BACKEND = 'pillow'
-CKEDITOR_CONFIGS = {
-    'default': {
-        'toolbar': 'Custom',
-        'toolbar_Custom': [
-            ['Bold', 'Italic', 'Underline'],
-            ['NumberedList', 'BulletedList', '-', 'Outdent', 'Indent', '-', 'JustifyLeft', 'JustifyCenter',
-             'JustifyRight', 'JustifyBlock'],
-            ['Link', 'Unlink'],
-            ['Image', 'Table', 'HorizontalRule'],
-            ['TextColor', 'BGColor'],
-            ['Smiley', 'SpecialChar'],
-            ['Source'],
-        ],
-        'height': 300,
-        'width': '100%',
+customColorPalette = [
+    {
+        'color': 'hsl(4, 90%, 58%)',
+        'label': 'Red'
     },
+    {
+        'color': 'hsl(340, 82%, 52%)',
+        'label': 'Pink'
+    },
+    {
+        'color': 'hsl(291, 64%, 42%)',
+        'label': 'Purple'
+    },
+    {
+        'color': 'hsl(262, 52%, 47%)',
+        'label': 'Deep Purple'
+    },
+    {
+        'color': 'hsl(231, 48%, 48%)',
+        'label': 'Indigo'
+    },
+    {
+        'color': 'hsl(207, 90%, 54%)',
+        'label': 'Blue'
+    },
+]
+CKEDITOR_5_CUSTOM_CSS = 'path_to.css' # optional
+CKEDITOR_5_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage' # optional
+CKEDITOR_5_CONFIGS = {
+    'default': {
+        'toolbar': ['heading', '|', 'bold', 'italic', 'link',
+                    'bulletedList', 'numberedList', 'blockQuote', 'imageUpload', ],
+    },
+    'extends': {
+        'blockToolbar': [
+            'paragraph', 'heading1', 'heading2', 'heading3',
+            '|',
+            'bulletedList', 'numberedList',
+            '|',
+            'blockQuote',
+        ],
+        'toolbar': ['heading', '|', 'outdent', 'indent', '|', 'bold', 'italic', 'link', 'underline', 'strikethrough',
+                    'code', 'subscript', 'superscript', 'highlight', '|', 'codeBlock', 'sourceEditing', 'insertImage',
+                    'bulletedList', 'numberedList', 'todoList', '|', 'blockQuote', '|',
+                    'fontSize', 'fontFamily', 'fontColor', 'fontBackgroundColor', 'mediaEmbed', 'removeFormat',
+                    'insertTable', ],
+        'image': {
+            'toolbar': ['imageTextAlternative', '|', 'imageStyle:alignLeft',
+                        'imageStyle:alignRight', 'imageStyle:alignCenter', 'imageStyle:side', '|'],
+            'styles': [
+                'full',
+                'side',
+                'alignLeft',
+                'alignRight',
+                'alignCenter',
+            ]
+
+        },
+        'table': {
+            'contentToolbar': ['tableColumn', 'tableRow', 'mergeTableCells',
+                               'tableProperties', 'tableCellProperties'],
+            'tableProperties': {
+                'borderColors': customColorPalette,
+                'backgroundColors': customColorPalette
+            },
+            'tableCellProperties': {
+                'borderColors': customColorPalette,
+                'backgroundColors': customColorPalette
+            }
+        },
+        'heading': {
+            'options': [
+                {'model': 'paragraph', 'title': 'Paragraph', 'class': 'ck-heading_paragraph'},
+                {'model': 'heading1', 'view': 'h1', 'title': 'Heading 1', 'class': 'ck-heading_heading1'},
+                {'model': 'heading2', 'view': 'h2', 'title': 'Heading 2', 'class': 'ck-heading_heading2'},
+                {'model': 'heading3', 'view': 'h3', 'title': 'Heading 3', 'class': 'ck-heading_heading3'}
+            ]
+        },
+
+        'fontFamily': {
+            'options': ['微软雅黑', '宋体', '黑体', '仿宋', '楷体', '隶书', '幼圆', 'Arial', 'Times New Roman',
+                        'Verdana', 'Helvetica', 'Georgia', 'Courier New', 'Impact', 'Comic Sans MS', 'Trebuchet MS'],
+            'supportAllValues': 'true',
+        },
+        'fontSize': {
+            'options': [
+                {'model': '56px', 'title': "初号", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '48px', 'title': "小初", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '34.7px', 'title': "一号", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '32px', 'title': "小一", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '29.3px', 'title': "二号", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '24px', 'title': "小二", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '21.3px', 'title': "三号", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '20px', 'title': "小三", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '18.7px', 'title': "四号", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '16px', 'title': "小四", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '14px', 'title': "五号", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '12px', 'title': "小五", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '10px', 'title': "六号", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '8.7px', 'title': "小六", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '7.3px', 'title': "七号", 'view': {'styles': {"font-size": '14px'}}},
+                {'model': '6.7px', 'title': "八号", 'view': {'styles': {"font-size": '14px'}}},
+            ],
+            'supportAllValues': 'true',
+        },
+        'height': '800px',
+    },
+    'list': {
+        'properties': {
+            'styles': 'true',
+            'startIndex': 'true',
+            'reversed': 'true',
+        }
+    }
 }
+
+# Define a constant in settings.py to specify file upload permissions
+CKEDITOR_5_FILE_UPLOAD_PERMISSION = "any"  # Possible values: "staff", "authenticated", "any"
+
+CKEDITOR_5_USER_LANGUAGE = True  # 使用Django配置的语言
+
 
 CACHES = {
     "default": {
@@ -254,3 +356,26 @@ CACHES = {
     }
 }
 
+# 设置默认的 Django 设置模块
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'NoteShareBackend.settings')
+
+app = Celery('NoteShareBackend')
+
+# 使用 Redis 作为消息代理
+app.config_from_object('django.conf:settings', namespace='CELERY')
+app.autodiscover_tasks()
+
+# Celery 配置
+CELERY_BROKER_URL = 'redis://localhost:6379/0'  # 消息代理
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0' # 结果后端
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+
+CELERY_BEAT_SCHEDULE = {
+    'update-top-notes-every-hour': {
+        'task': 'notesmanage.tasks.update_top_notes',
+        'schedule': 3600.0,  # 每小时执行一次
+    },
+}

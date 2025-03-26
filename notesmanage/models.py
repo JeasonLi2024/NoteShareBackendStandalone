@@ -1,15 +1,15 @@
-# models.py
+
 from django.db import models
 from django.contrib.auth import get_user_model
-from ckeditor.fields import RichTextField   #富文本编辑器
+from django_ckeditor_5.fields import CKEditor5Field#富文本编辑器
 
 User = get_user_model()
 
 
 class Note(models.Model):
-    title = models.CharField(max_length=255, verbose_name='标题')
-    content = models.TextField(blank=True, null=True, verbose_name='内容')
-    file = models.FileField(upload_to='notes/', blank=True, null=True, verbose_name='附件')
+    title = models.CharField(max_length=255, verbose_name='标题',default='CKEditor编辑页面')
+    content = models.TextField(blank=True, null=True, verbose_name='内容概括')
+    file = models.FileField(upload_to='notes/', blank=True, null=True, verbose_name='笔记文件')
     category = models.CharField(max_length=255, blank=True, null=True, verbose_name='类别')
     is_private = models.BooleanField(default=False, verbose_name='是否私有')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
@@ -20,10 +20,10 @@ class Note(models.Model):
     likes_count = models.PositiveIntegerField(default=0, verbose_name='点赞数')
     comments_count = models.PositiveIntegerField(default=0, verbose_name='评论数')
     is_pinned = models.BooleanField(default=False, verbose_name='是否置顶')
-    cover_image = models.ImageField(upload_to='covers/', null=True, blank=True)
+    cover_image = models.ImageField(upload_to='covers/', null=True, blank=True, verbose_name='封面图片')
     note_image = models.ImageField(upload_to='note_images/', blank=True, null=True, verbose_name='图片')
     note_video = models.FileField(upload_to='note_videos/', blank=True, null=True, verbose_name='视频')
-    body = RichTextField(blank=True, null=True, verbose_name='正文内容')
+    body = CKEditor5Field('正文内容',config_name='extends')
 
     def __str__(self):
         return self.title
@@ -46,3 +46,10 @@ class Comment(models.Model):
 
     def __str__(self):
         return f'Comment by {self.author.username} on {self.note.title}'
+
+class TopNote(models.Model):
+    note = models.OneToOneField(Note, on_delete=models.CASCADE)
+    popularity = models.FloatField()  # 热度值
+
+    def __str__(self):
+        return f"Top Note: {self.note.title} (Popularity: {self.popularity})"

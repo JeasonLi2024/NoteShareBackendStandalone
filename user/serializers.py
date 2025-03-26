@@ -5,6 +5,7 @@ UserModel = get_user_model()
 
 
 class UserSerializer(serializers.ModelSerializer):
+    phone = serializers.CharField(required=False)
     class Meta:
         model = UserModel
         fields = (

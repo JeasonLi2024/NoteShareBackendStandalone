@@ -1,49 +1,20 @@
 import os
+import heapq
 from rest_framework import generics, permissions, status
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import Note, Comment, Like
+from .models import Note, Comment, Like, TopNote
 from .serializers import NoteSerializer, CommentSerializer
 from django.db.models import Q
 from django.http import HttpResponse, Http404
-from django.shortcuts import get_object_or_404
+from .forms import CommentForm
+from django.shortcuts import get_object_or_404, render, redirect
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 import fitz  # PyMuPDF
 import docx
 import markdown
 
-
-# class AdminNoteListView(generics.ListAPIView):
-#     queryset = Note.objects.filter(is_private=False)
-#     serializer_class = NoteSerializer
-#     permission_classes = [IsAdminUser]
-
-
-# class AdminDeleteNoteView(generics.DestroyAPIView):
-#     queryset = Note.objects.all()
-#     serializer_class = NoteSerializer
-#     permission_classes = [IsAdminUser]
-#
-#     def destroy(self, request, *args, **kwargs):
-#         instance = self.get_object()
-#         author = instance.author  # 使用 author 字段指向笔记所属用户
-#         email = author.email  # 获取用户的邮箱
-#         # 发送邮件通知用户
-#         subject = '您的笔记已被删除'
-#         message = '您的笔记不符合规范已被管理员删除。'
-#         from_email = settings.DEFAULT_FROM_EMAIL
-#         recipient_list = [email]
-#         send_mail(subject, message, from_email, recipient_list)
-#
-#         # 删除笔记
-#         self.perform_destroy(instance)
-#
-#         return Response({
-#             "code": status.HTTP_204_NO_CONTENT,
-#             "message": "笔记已删除，并已通知用户",
-#             "data": {}
-#         }, status=status.HTTP_204_NO_CONTENT)
 
 class NoteListView(APIView):
     serializer_class = NoteSerializer
@@ -78,6 +49,15 @@ class NoteCreateView(generics.ListCreateAPIView):
             "data": serializer.data
         }, status=status.HTTP_201_CREATED, headers=headers)
 
+def create_note(request):
+    if request.method == 'POST':
+        form = CommentForm(data=request.POST)
+        if form.is_valid():
+            form.save()
+            return render(request, 'form-post-finished.html')
+    form = CommentForm()
+    return render(request, 'create_note.html', {'form': form})
+
 
 def preview_note(request, note_id):
     note = get_object_or_404(Note, id=note_id)
@@ -110,21 +90,48 @@ def preview_note(request, note_id):
             markdown_content = f.read()
             html_content = markdown.markdown(markdown_content)
             return HttpResponse(html_content)
-
     else:
         raise Http404("Unsupported file type.")
 
-class MultipleUsersNotesView(generics.ListAPIView):
+
+#根据热度排出的Top 10
+class TopNotesView(generics.ListAPIView):
     serializer_class = NoteSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
-        # 获取查询参数中的用户 ID 列表
-        user_ids = self.request.query_params.get('user_ids', '').split(',')
-        # 过滤出这些用户的非私有笔记
-        return Note.objects.filter(author_id__in=user_ids, is_private=False).order_by('-is_pinned', '-created_at')
+        # 直接从TopNote模型中获取热门笔记
+        return TopNote.objects.all().values_list('note', flat=True)
 
+# class MultipleUsersNotesView(generics.ListAPIView):
+#     serializer_class = NoteSerializer
+#     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+#
+#     def get_queryset(self):
+#         # 过滤出所有用户的非私有笔记
+#         queryset = Note.objects.filter(is_private=False)
+#
+#         # 定义一个最小堆，用于存储 Top 10 笔记
+#         top_10_notes = []
+#
+#         for note in queryset:
+#             # 计算热度
+#             popularity = 0.6 * note.views_count + 0.3 * note.likes_count + 0.1 * note.comments_count
+#
+#             # 如果堆未满或当前笔记的热度大于堆中的最小值
+#             if len(top_10_notes) < 10 or popularity > top_10_notes[0][0]:
+#                 if len(top_10_notes) == 10:
+#                     # 如果堆已满，移除堆顶元素（最小值）
+#                     heapq.heappop(top_10_notes)
+#                 # 将当前笔记加入堆中
+#                 heapq.heappush(top_10_notes, (popularity, note))
+#
+#         # 从堆中提取 Top 10 笔记，并按热度降序排序
+#         top_10_notes = [note for _, note in heapq.nlargest(10, top_10_notes)]
+#
+#         return top_10_notes
 
+#列出某个用户的所有公开笔记，并按是否置顶和创建时间进行排序
 class UserNotesView(generics.ListAPIView):
     serializer_class = NoteSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -144,12 +151,42 @@ class NoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
             return Note.objects.filter(author=self.request.user)
         return Note.objects.filter(is_private=False)
 
+    #retrieve方法处理 GET 请求，如果请求用户不是笔记的作者，则增加笔记的浏览数，并返回笔记信息
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
-        instance.views_count += 1
-        instance.save()
+        # 如果请求用户不是笔记的作者，则增加浏览数
+        if request.user != instance.author:
+            instance.views_count += 1
+            instance.save()
         serializer = self.get_serializer(instance)
-        return Response(serializer.data)
+        return Response({
+            "code": status.HTTP_200_OK,
+            "message": "Note retrieved successfully",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    #update方法处理 PUT 和 PATCH 请求，更新笔记内容，并返回成功消息和更新后的数据
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({
+            "code": status.HTTP_200_OK,
+            "message": "Note updated successfully",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+    #destroy方法处理DELETE请求，删除笔记，并返回成功消息
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        instance.delete()
+        return Response({
+            "code": status.HTTP_204_NO_CONTENT,
+            "message": "Note deleted successfully"
+        }, status=status.HTTP_204_NO_CONTENT)
+
 
 
 class NoteLikeView(generics.GenericAPIView):
