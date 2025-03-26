@@ -69,7 +69,7 @@ redis-cli.exe #另开一个cmd输入指令打开Redis客户端
 ping #在命令中输入ping命令来检测redis服务器与redis客户端的连通性，返回PONG则说明连接成功了。
 ```
 
-#### 提交项目celery 启动和异步任务的运行
+#### celery 启动和异步任务的运行
 ```shell
 celery -A NoteShareBackend worker --loglevel=info 
 celery -A NoteShareBackend beat --loglevel=info
@@ -116,3 +116,13 @@ celery -A NoteShareBackend beat --loglevel=info
 1. 完善用户注册登录模块，并添加了专业、学校、年级字段
 2. 修改代码return Response内容格式，以便于前端得到code信息
 3. 增加注册时的邮箱验证码认证功能
+
+2025-03-26 lwr
+1. 修改邮箱验证码存储方式，使用Redis缓存
+2. 修改用户更改信息的逻辑，在修改密码时使现有的Token失效，要求用户重新登录
+3. 增加笔记分享应用模块，初步建立功能雏形
+4. 细化用户上传笔记功能，使用CKEditor5实现类似Blog编辑功能（利用表单）
+5. 使用 Celery 异步任务队列定期计算热门Top 10笔记，并将结果存储在数据库中
+6. 增加笔记不同格式下的预览功能（转化为HTML链接）
+7. 设计浏览量计数逻辑，只有笔记所有者以外的用户访问才会激活计数
+8. 增加路由注释
