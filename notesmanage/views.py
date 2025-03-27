@@ -103,33 +103,35 @@ class TopNotesView(generics.ListAPIView):
         # 直接从TopNote模型中获取热门笔记
         return TopNote.objects.all().values_list('note', flat=True)
 
-# class MultipleUsersNotesView(generics.ListAPIView):
-#     serializer_class = NoteSerializer
-#     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-#
-#     def get_queryset(self):
-#         # 过滤出所有用户的非私有笔记
-#         queryset = Note.objects.filter(is_private=False)
-#
-#         # 定义一个最小堆，用于存储 Top 10 笔记
-#         top_10_notes = []
-#
-#         for note in queryset:
-#             # 计算热度
-#             popularity = 0.6 * note.views_count + 0.3 * note.likes_count + 0.1 * note.comments_count
-#
-#             # 如果堆未满或当前笔记的热度大于堆中的最小值
-#             if len(top_10_notes) < 10 or popularity > top_10_notes[0][0]:
-#                 if len(top_10_notes) == 10:
-#                     # 如果堆已满，移除堆顶元素（最小值）
-#                     heapq.heappop(top_10_notes)
-#                 # 将当前笔记加入堆中
-#                 heapq.heappush(top_10_notes, (popularity, note))
-#
-#         # 从堆中提取 Top 10 笔记，并按热度降序排序
-#         top_10_notes = [note for _, note in heapq.nlargest(10, top_10_notes)]
-#
-#         return top_10_notes
+
+class Top10NotesView(generics.ListAPIView):
+    serializer_class = NoteSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        # 过滤出所有用户的非私有笔记
+        queryset = Note.objects.filter(is_private=False)
+
+        # 定义一个最小堆，用于存储 Top 10 笔记
+        top_10_notes = []
+
+        for note in queryset:
+            # 计算热度
+            popularity = 0.6 * note.views_count + 0.3 * note.likes_count + 0.1 * note.comments_count
+
+            # 如果堆未满或当前笔记的热度大于堆中的最小值
+            if len(top_10_notes) < 10 or popularity > top_10_notes[0][0]:
+                if len(top_10_notes) == 10:
+                    # 如果堆已满，移除堆顶元素（最小值）
+                    heapq.heappop(top_10_notes)
+                # 将当前笔记加入堆中
+                heapq.heappush(top_10_notes, (popularity, note))
+
+        # 从堆中提取 Top 10 笔记，并按热度降序排序
+        top_10_notes = [note for _, note in heapq.nlargest(10, top_10_notes)]
+
+        return top_10_notes
+
 
 #列出某个用户的所有公开笔记，并按是否置顶和创建时间进行排序
 class UserNotesView(generics.ListAPIView):

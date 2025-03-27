@@ -39,10 +39,3 @@ class NoteAdmin(admin.ModelAdmin):
     formfield_overrides = {
         CKEditor5Field: {'widget': CKEditor5Widget(config_name='extends')}
     }
-
-# class ArticleAdmin(admin.ModelAdmin):
-#     formfield_overrides = {
-#         CKEditor5Field: {'widget': CKEditor5Widget(config_name='extends')}
-#     }
-#
-# admin.site.register(Note, ArticleAdmin)

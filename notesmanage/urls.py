@@ -5,7 +5,7 @@ from . import views
 from notesmanage.views import (
     UserNotesView, NoteCreateView, NoteRetrieveUpdateDestroyView,
     NoteLikeView, CommentListCreateView, PinNoteView, NoteSearchView,
-    TopNotesView, preview_note, NoteDetailView, NoteListView
+    TopNotesView, preview_note, NoteDetailView, NoteListView, Top10NotesView
 )
 
 urlpatterns = [
@@ -28,7 +28,8 @@ urlpatterns = [
                   #笔记搜索
                   path('notes/search/', NoteSearchView.as_view(), name='note-search'),
                   #笔记首页展示热门笔记Top10
-                  path('users/notes/Top_10/', TopNotesView.as_view(), name='multiple-users-notes'),
+                  path('users/notes/Top/', TopNotesView.as_view(), name='top-notes'),
+                  path('users/notes/Top_10/', Top10NotesView.as_view(), name='top10-notes'),
                   #笔记预览（似乎也不需用设置这个路由）
                   path('notes/<int:note_id>/preview/', preview_note, name='note-preview'),
                   #笔记详细信息（面向用户）

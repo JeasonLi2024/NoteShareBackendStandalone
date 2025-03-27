@@ -30,20 +30,28 @@ from rest_framework_simplejwt.views import (
 from django.conf import settings
 from django.conf.urls.static import static
 
-router = SimpleRouter()
+# router = SimpleRouter()
 # router.register(r'user', UserViewSet, basename='user')
 urlpatterns = [
+
     path('send-code/', SendVerificationCodeView.as_view(), name='send-verification-code'),
     path('register/', RegisterView.as_view(), name='register'),
     path('login/', LoginView.as_view(), name='login'),
+
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+
     path("admin/", admin.site.urls),
     path("ckeditor5/", include('django_ckeditor_5.urls')),
     path('user/', include('user.urls')),
     path('notesmanage/', include('notesmanage.urls')),
+
+    # 更新功能已经包含头像更新
     path('user/update/', UserUpdateView.as_view(), name='user-update'),
-    path('user/<int:pk>/update-avatar/', UserViewSet.as_view({'post': 'update_avatar'})),
+
+    # 我觉得不用单独这个更新头像路由了
+    # path('user/<int:pk>/update-avatar/', UserViewSet.as_view({'post': 'update_avatar'})),
+
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 

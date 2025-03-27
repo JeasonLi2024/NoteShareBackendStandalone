@@ -48,16 +48,6 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return user
 
 
-# class LoginSerializer(serializers.Serializer):
-#     username = serializers.CharField()
-#     password = serializers.CharField()
-#
-#     def validate(self, data):
-#         user = authenticate(**data)
-#         if user and user.is_active:
-#             return user
-#         raise serializers.ValidationError("Invalid credentials")
-
 #支持用户名/手机号/邮箱+密码登录
 class LoginSerializer(serializers.Serializer):
     username_or_email_or_phone = serializers.CharField()
