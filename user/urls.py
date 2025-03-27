@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import UserViewSet
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
+from rest_framework.permissions import AllowAny
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet, basename='user')
@@ -16,7 +17,8 @@ schema_view = get_schema_view(
         contact=openapi.Contact(email='2495128088@qq.com'),
         license=openapi.License(name="BSD License"),
     ),
-    public=True
+    public=True,
+    permission_classes = [AllowAny]
 )
 
 urlpatterns = [

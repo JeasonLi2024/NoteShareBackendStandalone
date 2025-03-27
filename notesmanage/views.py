@@ -15,7 +15,7 @@ import fitz  # PyMuPDF
 import docx
 import markdown
 
-
+# 笔记列表（测试用），已验证
 class NoteListView(APIView):
     serializer_class = NoteSerializer
     permission_classes = [AllowAny]
@@ -29,7 +29,7 @@ class NoteListView(APIView):
             "data": serializer.data
         }, status=status.HTTP_200_OK)
 
-
+# 新建笔记，没有在后端可视化验证，可能需要在前端验证，前端用配置CKEDITOR_5吗？？）
 class NoteCreateView(generics.ListCreateAPIView):
     queryset = Note.objects.all()
     serializer_class = NoteSerializer
@@ -49,16 +49,17 @@ class NoteCreateView(generics.ListCreateAPIView):
             "data": serializer.data
         }, status=status.HTTP_201_CREATED, headers=headers)
 
+# 使用表单经过验证，但网页十分简洁，详见templates目录下的create_note.html（该目录下的另一个文件夹中的.html暂时没有使用）
 def create_note(request):
     if request.method == 'POST':
         form = CommentForm(data=request.POST)
         if form.is_valid():
             form.save()
-            return render(request, 'form-post-finished.html')
+            return render(request, 'form-post-finished.html') # 这个地方的逻辑时提交成功后跳转到一个名为form-post-finished.html的页面，我没有在后端设置，这个相关路由只是为了在后端可视化测试CKEDITOR_5是否可用
     form = CommentForm()
     return render(request, 'create_note.html', {'form': form})
 
-
+# 定义了一些预览上传的笔记文件的方法，已验证（可点击笔记详情中的文件链接进行访问）
 def preview_note(request, note_id):
     note = get_object_or_404(Note, id=note_id)
     file_path = note.file.path if note.file else None
@@ -94,7 +95,7 @@ def preview_note(request, note_id):
         raise Http404("Unsupported file type.")
 
 
-#根据热度排出的Top 10
+# 根据热度排出的Top 10，未测试
 class TopNotesView(generics.ListAPIView):
     serializer_class = NoteSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -103,7 +104,7 @@ class TopNotesView(generics.ListAPIView):
         # 直接从TopNote模型中获取热门笔记
         return TopNote.objects.all().values_list('note', flat=True)
 
-
+# 根据热度排出的Top 10，没有采用上面提到的异步处理方案，未测试
 class Top10NotesView(generics.ListAPIView):
     serializer_class = NoteSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -133,7 +134,7 @@ class Top10NotesView(generics.ListAPIView):
         return top_10_notes
 
 
-#列出某个用户的所有公开笔记，并按是否置顶和创建时间进行排序
+# 列出某个用户的所有公开笔记，并按是否置顶和创建时间进行排序，未完全验证（需要在更多测试数据下进行）
 class UserNotesView(generics.ListAPIView):
     serializer_class = NoteSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -142,7 +143,7 @@ class UserNotesView(generics.ListAPIView):
         user_id = self.kwargs['user_id']
         return Note.objects.filter(author_id=user_id, is_private=False).order_by('-is_pinned', '-created_at')
 
-
+# 用户访问、修改、删除笔记，已验证非笔记所有者用户访问时浏览数增加，剩下的修改和删除未验证
 class NoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Note.objects.all()
     serializer_class = NoteSerializer
@@ -190,7 +191,7 @@ class NoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
         }, status=status.HTTP_204_NO_CONTENT)
 
 
-
+# 点赞视图，未验证
 class NoteLikeView(generics.GenericAPIView):
     queryset = Note.objects.all()
     permission_classes = [permissions.IsAuthenticated]
@@ -210,7 +211,7 @@ class NoteLikeView(generics.GenericAPIView):
             return Response({'detail': 'Unliked'}, status=status.HTTP_204_NO_CONTENT)
         return Response({'detail': 'Not liked'}, status=status.HTTP_200_OK)
 
-
+# 评论视图，未验证
 class CommentListCreateView(generics.ListCreateAPIView):
     serializer_class = CommentSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -223,7 +224,7 @@ class CommentListCreateView(generics.ListCreateAPIView):
         note_id = self.kwargs['note_id']
         serializer.save(author=self.request.user, note_id=note_id)
 
-
+# 置顶视图，感觉不需要单独设计此功能的视图，在模型中已添加该类型字段
 class PinNoteView(generics.UpdateAPIView):
     queryset = Note.objects.all()
     serializer_class = NoteSerializer
@@ -237,7 +238,7 @@ class PinNoteView(generics.UpdateAPIView):
             return Response({'detail': 'Pinned' if note.is_pinned else 'Unpinned'}, status=status.HTTP_200_OK)
         return Response({'detail': 'You are not the author of this note'}, status=status.HTTP_403_FORBIDDEN)
 
-
+# 搜索视图，未验证
 class NoteSearchView(generics.ListAPIView):
     serializer_class = NoteSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -251,6 +252,7 @@ class NoteSearchView(generics.ListAPIView):
             ).order_by('-created_at')
         return Note.objects.filter(is_private=False).order_by('-created_at')
 
+# 笔记详情视图，是否需要有待验证，原先的想法是利用此功能实现用户访问其他人的笔记时可以看到对方笔记的详细内容，但AI给的这个代码实现了类似管理员的视角，显然有点问题哈哈
 class NoteDetailView(RetrieveAPIView):
     queryset = Note.objects.all()
     serializer_class = NoteSerializer
