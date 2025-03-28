@@ -8,7 +8,8 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import PermissionDenied, NotFound
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken, OutstandingToken, BlacklistedToken
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.conf import settings
@@ -61,7 +62,7 @@ class RegisterView(generics.CreateAPIView):
         if not email or not verification_code:
             return Response({
                 "code": status.HTTP_400_BAD_REQUEST,
-                "message": "Email and verification code are required",
+                "message": "邮箱和验证码不能为空",
                 "data": {}
             }, status=status.HTTP_400_BAD_REQUEST)
 
@@ -71,7 +72,7 @@ class RegisterView(generics.CreateAPIView):
         if not stored_code or verification_code != stored_code:
             return Response({
                 "code": status.HTTP_400_BAD_REQUEST,
-                "message": "Invalid verification code",
+                "message": "验证码无效",
                 "data": {}
             }, status=status.HTTP_400_BAD_REQUEST)
 
@@ -108,7 +109,7 @@ class LoginView(APIView):
             }, status=status.HTTP_200_OK)
         return Response({
             "code": status.HTTP_401_UNAUTHORIZED,
-            "message": "error",
+            "message": "用户名或密码错误",
             "data": serializer.errors
         }, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -116,31 +117,29 @@ class LoginView(APIView):
 class UserUpdateView(RetrieveUpdateAPIView):
     queryset = get_user_model().objects.all()
     serializer_class = UserSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]  # 修正为需要认证
 
     def get_object(self):
         return self.request.user
 
     def update(self, request, *args, **kwargs):
-        # 检查请求中是否包含了新密码
         if 'password' in request.data:
-            # 获取当前用户
             user = self.get_object()
-            # 更新用户密码
             user.set_password(request.data['password'])
             user.save()
 
-            # 黑名单所有未过期的Token
-            for token in OutstandingToken.objects.filter(user=user):
+            # 黑名单处理
+            tokens = OutstandingToken.objects.filter(user=user)
+            for token in tokens:
                 BlacklistedToken.objects.get_or_create(token=token)
 
-            # 返回需要重新登录的信息，可能需要前端跳转页面的操作
             return Response({
                 "code": status.HTTP_200_OK,
                 "message": "Password updated, please log in again.",
                 "data": None
             }, status=status.HTTP_200_OK)
-        # 调用了父类的 `update` 方法，更新其他字段，返回值 `response` 是一个 `Response` 对象，包含了更新后的数据和状态码
+
+        # 处理其他字段更新
         response = super().update(request, *args, **kwargs)
         if response.status_code == status.HTTP_200_OK:
             return Response({
@@ -234,26 +233,3 @@ class UserViewSet(viewsets.ViewSet):
             "message": "success",
             "data": {}
         }, status=status.HTTP_204_NO_CONTENT)
-
-    # 上传头像 我觉得好像不用单独设置一个头像上传的功能，在UserUpdateView里好像就可以实现
-    # @action(detail=True, methods=['put', 'patch'], permission_classes=[IsAuthenticated])
-    # def update_avatar(self, request, pk=None):
-    #     user = get_object_or_404(User, pk=pk)
-    #
-    #     # Ensure the authenticated user is updating their own avatar
-    #     if user != request.user:
-    #         raise PermissionDenied("You can only update your own avatar.")
-    #
-    #     serializer = UserCreateSerializer(user, data=request.data, partial=True)
-    #     if serializer.is_valid():
-    #         serializer.save()
-    #         return Response({
-    #             "code": status.HTTP_200_OK,
-    #             "message": "success",
-    #             "data": serializer.data
-    #         }, status=status.HTTP_200_OK)
-    #     return Response({
-    #         "code": status.HTTP_400_BAD_REQUEST,
-    #         "message": "error",
-    #         "data": serializer.errors
-    #     }, status=status.HTTP_400_BAD_REQUEST)

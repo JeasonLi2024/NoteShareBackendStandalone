@@ -49,9 +49,6 @@ urlpatterns = [
     # 更新功能已经包含头像更新
     path('user/update/', UserUpdateView.as_view(), name='user-update'),
 
-    # 我觉得不用单独这个更新头像路由了
-    # path('user/<int:pk>/update-avatar/', UserViewSet.as_view({'post': 'update_avatar'})),
-
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 

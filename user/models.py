@@ -32,7 +32,7 @@ class User(AbstractBaseUser, PermissionsMixin):
             self.avatar = default_avatar_path
         super().save(*args, **kwargs)
 
-    email = models.EmailField(unique=True, verbose_name='电子邮件', null=True, blank=True)
+    email = models.EmailField(unique=True, verbose_name='电子邮件')
     created_at = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
     last_login = models.DateTimeField(null=True, blank=True, verbose_name='最后登录时间')
 

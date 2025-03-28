@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'rest_framework',
     'rest_framework_simplejwt',  # 添加 simplejwt 应用
+    'rest_framework_simplejwt.token_blacklist',
     'django_filters',
     'drf_yasg',
     'user',
@@ -113,6 +114,9 @@ REST_FRAMEWORK = {
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(days=7),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=14),
+    'ROTATE_REFRESH_TOKENS': True,  # 当设置为 `True` 时，每次使用刷新令牌生成新的访问令牌时，都会生成一个新的刷新令牌，并使旧的刷新令牌失效。
+    'BLACKLIST_AFTER_ROTATION': True, # 将旧的刷新令牌添加到黑名单
+
 }
 
 AUTHENTICATION_BACKENDS = [
@@ -137,7 +141,7 @@ FILTERS_DEFAULT_LOOKUP_EXPR = 'icontains'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'note_share',
+        'NAME': 'notesharedb',
         'USER': 'root',
         'PASSWORD': DB_PASSWORD,
         'HOST': '127.0.0.1',

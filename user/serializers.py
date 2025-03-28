@@ -11,7 +11,8 @@ class UserSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'username', 'email', 'avatar', 'phone', 'created_at', 'last_login',
             'school', 'major', 'grade'  # 添加新的字段
-        )# 不返回密码字段，保护用户隐私
+        )
+        extra_kwargs = {'password': {'write_only': True}}
         read_only_fields = ('created_at', 'last_login')
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -60,12 +61,23 @@ class LoginSerializer(serializers.Serializer):
         # 尝试通过用户名、邮箱或手机号进行用户认证
         user = None
         if '@' in username_or_email_or_phone:
+            print(f"Trying to find user by email: {username_or_email_or_phone}")
             user = UserModel.objects.filter(email=username_or_email_or_phone).first()
         elif username_or_email_or_phone.isdigit():
+            print(f"Trying to find user by phone: {username_or_email_or_phone}")
             user = UserModel.objects.filter(phone=username_or_email_or_phone).first()
         else:
+            print(f"Trying to find user by username: {username_or_email_or_phone}")
             user = UserModel.objects.filter(username=username_or_email_or_phone).first()
 
-        if user and user.check_password(password):
-            return user
+        if user:
+            print(f"Found user: {user.username}, is_active: {user.is_active}")
+            if user.check_password(password):
+                return user
+            else:
+                print("Password does not match.")
+        else:
+            print("No user found with the provided information.")
+
         raise serializers.ValidationError("无法使用提供的信息登录。")
+
