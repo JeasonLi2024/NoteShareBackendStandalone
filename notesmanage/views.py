@@ -29,7 +29,7 @@ class NoteListView(APIView):
             "data": serializer.data
         }, status=status.HTTP_200_OK)
 
-# 新建笔记，没有在后端可视化验证，可能需要在前端验证，前端用配置CKEDITOR_5吗？？）
+# 新建笔记，没有在后端可视化验证，可能需要在前端验证，前端可能需要配置CKEDITOR_5
 class NoteCreateView(generics.ListCreateAPIView):
     queryset = Note.objects.all()
     serializer_class = NoteSerializer
@@ -59,7 +59,7 @@ def create_note(request):
     form = CommentForm()
     return render(request, 'create_note.html', {'form': form})
 
-# 定义了一些预览上传的笔记文件的方法，已验证（可点击笔记详情中的文件链接进行访问）
+# 定义了一些预览上传的笔记文件的方法，已验证 （PDF文件有的可以预览内容有的不行）
 def preview_note(request, note_id):
     note = get_object_or_404(Note, id=note_id)
     file_path = note.file.path if note.file else None
@@ -95,7 +95,7 @@ def preview_note(request, note_id):
         raise Http404("Unsupported file type.")
 
 
-# 根据热度排出的Top 10，未测试
+# 异步功能根据热度排出的Top 10，未测试
 class TopNotesView(generics.ListAPIView):
     serializer_class = NoteSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -104,7 +104,7 @@ class TopNotesView(generics.ListAPIView):
         # 直接从TopNote模型中获取热门笔记
         return TopNote.objects.all().values_list('note', flat=True)
 
-# 根据热度排出的Top 10，没有采用上面提到的异步处理方案，未测试
+# 根据热度排出的Top 10，没有采用上面提到的异步处理方案，在每次发送请求时现排，已验证
 class Top10NotesView(generics.ListAPIView):
     serializer_class = NoteSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
