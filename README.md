@@ -36,6 +36,7 @@ python manage.py createsuperuser
 #### 运行项目
 ```shell
 python manage.py runserver
+python manage.py runserver 0.0.0.0:8000
 ```
 
 ## 拉取更新
@@ -74,6 +75,8 @@ ping #在命令中输入ping命令来检测redis服务器与redis客户端的连
 celery -A NoteShareBackend worker --loglevel=info 
 celery -A NoteShareBackend beat --loglevel=info
 ```
+
+
 
 
 ## 更新日志
