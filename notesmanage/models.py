@@ -33,6 +33,15 @@ class Note(models.Model):
     def __str__(self):
         return self.title
 
+    @property
+    def author_info(self):
+        """返回作者的信息"""
+        return {
+            'id': self.author.id,
+            'username': self.author.username,
+            'avatar': self.author.avatar.url if self.author.avatar else None
+        }
+
 
 class Like(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)

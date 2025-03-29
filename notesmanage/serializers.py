@@ -4,7 +4,7 @@ from .models import Note, Comment
 
 
 class NoteSerializer(serializers.ModelSerializer):
-    author = serializers.StringRelatedField(read_only=True)
+    author_info = serializers.SerializerMethodField()
     like_count = serializers.SerializerMethodField()
     comment_count = serializers.SerializerMethodField()
 
@@ -13,6 +13,13 @@ class NoteSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['author', 'likes', 'views_count', 'likes_count', 'comments_count'
 ]
+    def get_author_info(self, obj):
+        request = self.context.get('request')
+        author_info = obj.author_info
+        if author_info['avatar']:
+            author_info['avatar'] = request.build_absolute_uri(author_info['avatar'])
+        return author_info
+
     def validate_title(self, value):
         if len(value) < 5:
             raise serializers.ValidationError("标题至少需要5个字符")
