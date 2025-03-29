@@ -15,6 +15,9 @@ from django.core.mail import send_mail
 from django.conf import settings
 import random
 from django.core.cache import cache
+from rest_framework.exceptions import ValidationError
+from django.utils.translation import override
+
 
 User = get_user_model()
 
@@ -59,6 +62,7 @@ class RegisterView(generics.CreateAPIView):
         verification_code = request.data.get('verification_code')
         email = request.data.get('email')
 
+        # 基础验证：邮箱和验证码必填
         if not email or not verification_code:
             return Response({
                 "code": status.HTTP_400_BAD_REQUEST,
@@ -66,28 +70,57 @@ class RegisterView(generics.CreateAPIView):
                 "data": {}
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # 从Redis中获取生成的验证码
+        # 验证码校验逻辑
         stored_code = cache.get(f'verification_code:{email}')
-
         if not stored_code or verification_code != stored_code:
             return Response({
                 "code": status.HTTP_400_BAD_REQUEST,
-                "message": "验证码无效",
+                "message": "验证码无效或已过期",
                 "data": {}
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        response = super().create(request, *args, **kwargs)
+        # 使用中文环境处理创建流程
+        try:
+            with override('zh-hans'):  # 确保序列化器错误返回中文
+                response = super().create(request, *args, **kwargs)
+
+        except ValidationError as e:
+            # 处理字段验证错误
+            return Response({
+                "code": status.HTTP_400_BAD_REQUEST,
+                "message": self.get_error_message(e.detail),
+                "data": {}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 处理创建成功的情况
         if response.status_code == status.HTTP_201_CREATED:
             return Response({
                 "code": status.HTTP_201_CREATED,
-                "message": "success",
+                "message": "注册成功",
                 "data": response.data
             }, status=status.HTTP_201_CREATED)
+
+        # 处理其他异常状态（理论上不会执行到这里）
         return Response({
             "code": response.status_code,
-            "message": "error",
+            "message": self.get_error_message(response.data),
             "data": response.data
         }, status=response.status_code)
+
+    # 统一错误消息格式化方法（与UserUpdateView保持复用）
+    def get_error_message(self, error_data):
+        """将DRF的错误数据结构转换为中文字符串"""
+        if isinstance(error_data, dict):
+            errors = []
+            for field, messages in error_data.items():
+                if isinstance(messages, list):
+                    errors.append(f"{field}: {messages[0]}")
+                else:
+                    errors.append(f"{field}: {messages}")
+            return "; ".join(errors)
+        elif isinstance(error_data, list):
+            return "; ".join(error_data)
+        return str(error_data)
 
 # 登录功能
 class LoginView(APIView):
@@ -113,6 +146,7 @@ class LoginView(APIView):
             "data": serializer.errors
         }, status=status.HTTP_401_UNAUTHORIZED)
 
+
 # 用户更新信息功能，添加若更改密码则拉黑现有Token并要求用户重新登录
 class UserUpdateView(RetrieveUpdateAPIView):
     queryset = get_user_model().objects.all()
@@ -133,25 +167,47 @@ class UserUpdateView(RetrieveUpdateAPIView):
             for token in tokens:
                 BlacklistedToken.objects.get_or_create(token=token)
 
+        # 处理其他字段的更新，异常捕获：使用 try-except 捕获 ValidationError，确保父类 update 方法中的验证错误能被处理，避免直接返回未包装的响应。
+        try:
+            # 临时切换语言环境为中文
+            with override('zh-hans'):
+                response = super().update(request, *args, **kwargs)
+        except ValidationError as e:
+            error_message = self.get_error_message(e.detail)
             return Response({
-                "code": status.HTTP_200_OK,
-                "message": "Password updated, please log in again.",
+                "code": status.HTTP_400_BAD_REQUEST,
+                "message": error_message,
                 "data": None
-            }, status=status.HTTP_200_OK)
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-        # 处理其他字段更新
-        response = super().update(request, *args, **kwargs)
         if response.status_code == status.HTTP_200_OK:
             return Response({
                 "code": status.HTTP_200_OK,
                 "message": "success",
                 "data": response.data
             }, status=status.HTTP_200_OK)
-        return Response({
-            "code": response.status_code,
-            "message": "error",
-            "data": response.data
-        }, status=response.status_code)
+        else:
+            error_message = self.get_error_message(response.data)
+            return Response({
+                "code": response.status_code,
+                "message": error_message,
+                "data": None
+            }, status=response.status_code)
+
+    # 将 DRF 默认的错误结构（如字典或列表）转换为字符串，便于前端直接显示。
+    def get_error_message(self, error_data):
+        if isinstance(error_data, dict):
+            errors = []
+            for key, value in error_data.items():
+                if isinstance(value, list):
+                    errors.append(f"{key}: {value[0]}")
+                else:
+                    errors.append(f"{key}: {value}")
+            return "; ".join(errors)
+        elif isinstance(error_data, list):
+            return "; ".join(error_data)
+        else:
+            return str(error_data)
 
 # 视图集
 class UserViewSet(viewsets.ViewSet):

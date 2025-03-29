@@ -60,16 +60,19 @@ class CustomUserAdmin(admin.ModelAdmin):
     add_form = UserCreationForm
 
     # 列表页显示的字段
-    list_display = ['id', 'username', 'phone', 'email', 'reset_password']
+    list_display = ['id', 'username', 'phone', 'email', 'school', 'major', 'reset_password']
+
+    # 可跳转的字段
+    list_display_links = ['id', 'username']
 
     # 搜索字段
-    search_fields = ['username', 'phone', 'email']
+    search_fields = ['username', 'phone', 'email', 'school', 'major', 'grade']
 
     # 排序
     ordering = ['id']
 
     # 列表页可以直接编辑的字段
-    list_editable = ['phone']
+    list_editable = []
 
     # 过滤器
     list_filter = ['username']

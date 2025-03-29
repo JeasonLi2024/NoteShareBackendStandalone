@@ -22,7 +22,7 @@ class NoteListView(APIView):
     def get(self, request):
         # 获取所有笔记
         notes = Note.objects.all()
-        serializer = NoteSerializer(notes, many=True)
+        serializer = NoteSerializer(notes, many=True, context={'request': request})
         return Response({
             "code": status.HTTP_200_OK,
             "message": "success",

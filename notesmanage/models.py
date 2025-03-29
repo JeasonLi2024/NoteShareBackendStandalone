@@ -25,6 +25,11 @@ class Note(models.Model):
     note_video = models.FileField(upload_to='note_videos/', blank=True, null=True, verbose_name='视频')
     body = CKEditor5Field('正文内容',config_name='extends')
 
+    class Meta:
+        db_table = 'note'
+        verbose_name = '笔记'
+        verbose_name_plural = '笔记'
+
     def __str__(self):
         return self.title
 
