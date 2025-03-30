@@ -19,10 +19,8 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractBaseUser, PermissionsMixin):
-
     username = models.CharField(max_length=10, unique=True)
     phone = models.CharField(max_length=11, unique=True, verbose_name='手机号')
-
     avatar = models.ImageField(upload_to='avatars/', null=True, blank=True, verbose_name='头像')
     def save(self, *args, **kwargs):
         if not self.avatar:
@@ -31,14 +29,13 @@ class User(AbstractBaseUser, PermissionsMixin):
             default_avatar_path = f'avatars/{random.choice(default_avatars)}'
             self.avatar = default_avatar_path
         super().save(*args, **kwargs)
-
     email = models.EmailField(unique=True, verbose_name='电子邮件')
     created_at = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
     last_login = models.DateTimeField(null=True, blank=True, verbose_name='最后登录时间')
-
-    school = models.CharField(max_length=100, verbose_name='学校', null=True, blank=True)
-    major = models.CharField(max_length=100, verbose_name='专业', null=True, blank=True)
-    grade = models.CharField(max_length=100, verbose_name='年级', null=True, blank=True)
+    introduction = models.CharField(max_length=200, null=True, blank=True, verbose_name='个人简介')
+    school = models.CharField(max_length=100, null=True, blank=True, verbose_name='学校')
+    major = models.CharField(max_length=100, null=True, blank=True, verbose_name='专业')
+    grade = models.CharField(max_length=100, null=True, blank=True, verbose_name='年级')
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)

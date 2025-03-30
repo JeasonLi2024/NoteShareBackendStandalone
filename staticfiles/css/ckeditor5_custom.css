@@ -1,0 +1,5 @@
+
+.ck.ck-dropdown__panel {
+    max-height: 300px !important;  /* 限制最大高度 */
+    overflow-y: auto !important;   /* 强制显示滚动条 */
+}

@@ -31,7 +31,7 @@ SECRET_KEY = "django-insecure-$cjwom+ue1_w@m$514zvtkk9wxu3z01phdwcapxj04*+-jl&r@
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['10.29.118.199']
+ALLOWED_HOSTS = ['10.29.118.199', '127.0.0.1']
 
 # 加载环境变量
 load_dotenv()
@@ -142,7 +142,7 @@ FILTERS_DEFAULT_LOOKUP_EXPR = 'icontains'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'notesharedb',
+        'NAME': 'note_share_db',
         'USER': 'root',
         'PASSWORD': DB_PASSWORD,
         'HOST': '127.0.0.1',
@@ -190,7 +190,7 @@ STATIC_URL = '/static/'
 
 # Additional locations of static files
 STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, "user/static"),
+    os.path.join(BASE_DIR, "static"),
     # 有条件地添加其他静态文件目录
 ]
 
@@ -262,6 +262,15 @@ CKEDITOR_5_CONFIGS = {
     'default': {
         'toolbar': ['heading', '|', 'bold', 'italic', 'link',
                     'bulletedList', 'numberedList', 'blockQuote', 'imageUpload', ],
+        'toolbarOptions': {
+            'shouldNotGroupWhenFull': True,
+            'itemsLimit': 10,
+            'compact': False,  # 取消紧凑模式
+            'height': 60,  # 增加工具栏高度
+            'scrollable': True,  # 启用滚动条
+        },
+        'extraPlugins': ['fontFamily', 'fontSize'],
+        'language': 'zh',
     },
     'extends': {
         'blockToolbar': [
@@ -308,7 +317,6 @@ CKEDITOR_5_CONFIGS = {
                 {'model': 'heading3', 'view': 'h3', 'title': 'Heading 3', 'class': 'ck-heading_heading3'}
             ]
         },
-
         'fontFamily': {
             'options': ['微软雅黑', '宋体', '黑体', '仿宋', '楷体', '隶书', '幼圆', 'Arial', 'Times New Roman',
                         'Verdana', 'Helvetica', 'Georgia', 'Courier New', 'Impact', 'Comic Sans MS', 'Trebuchet MS'],
@@ -373,15 +381,16 @@ app.autodiscover_tasks()
 
 # Celery 配置
 CELERY_BROKER_URL = 'redis://localhost:6379/0'  # 消息代理
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0' # 结果后端
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/1' # 结果后端
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = 'UTC'
+CELERY_TIMEZONE = 'Asia/Shanghai'
 
 CELERY_BEAT_SCHEDULE = {
-    'update-top-notes-every-hour': {
-        'task': 'notesmanage.tasks.update_top_notes',
-        'schedule': 3600.0,  # 每小时执行一次
+    'update-top-notes-every-1m': {
+        'task': 'notesmanage.tasks.periodic_update_popularity',
+        'schedule': 600 ,  # 每1分钟执行一次
+        'options': {'queue': 'periodic_tasks'},
     },
 }

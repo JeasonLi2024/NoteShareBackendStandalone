@@ -10,7 +10,7 @@ from django.db.models import Q
 from django.http import HttpResponse, Http404
 from .forms import CommentForm
 from django.shortcuts import get_object_or_404, render, redirect
-from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny, IsAuthenticatedOrReadOnly
 import fitz  # PyMuPDF
 import docx
 import markdown
@@ -96,18 +96,26 @@ def preview_note(request, note_id):
 
 
 # 异步功能根据热度排出的Top 10，未测试
+# class TopNotesView(generics.ListAPIView):
+#     serializer_class = NoteSerializer
+#     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+#
+#     def get_queryset(self):
+#         # 直接从TopNote模型中获取热门笔记
+#         return TopNote.objects.all().values_list('note', flat=True)
+
 class TopNotesView(generics.ListAPIView):
     serializer_class = NoteSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [AllowAny]
 
     def get_queryset(self):
-        # 直接从TopNote模型中获取热门笔记
-        return TopNote.objects.all().values_list('note', flat=True)
+        # 直接通过索引快速定位 Top 10
+        return Note.objects.filter(is_private=False).order_by('-popularity')[:10]
 
 # 根据热度排出的Top 10，没有采用上面提到的异步处理方案，在每次发送请求时现排，已验证
 class Top10NotesView(generics.ListAPIView):
     serializer_class = NoteSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
         # 过滤出所有用户的非私有笔记
@@ -126,10 +134,10 @@ class Top10NotesView(generics.ListAPIView):
                     # 如果堆已满，移除堆顶元素（最小值）
                     heapq.heappop(top_10_notes)
                 # 将当前笔记加入堆中
-                heapq.heappush(top_10_notes, (popularity, note))
+                heapq.heappush(top_10_notes, (popularity, note.id, note))
 
         # 从堆中提取 Top 10 笔记，并按热度降序排序
-        top_10_notes = [note for _, note in heapq.nlargest(10, top_10_notes)]
+        top_10_notes = [note for _, _, note in heapq.nlargest(10, top_10_notes)]
 
         return top_10_notes
 
@@ -137,17 +145,24 @@ class Top10NotesView(generics.ListAPIView):
 # 列出某个用户的所有公开笔记，并按是否置顶和创建时间进行排序，未完全验证（需要在更多测试数据下进行）
 class UserNotesView(generics.ListAPIView):
     serializer_class = NoteSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
         user_id = self.kwargs['user_id']
-        return Note.objects.filter(author_id=user_id, is_private=False).order_by('-is_pinned', '-created_at')
+        current_user = self.request.user
+        queryset = Note.objects.filter(author_id=user_id)
+
+        # 如果是所有者本人请求，返回所有笔记
+        if current_user.is_authenticated and current_user.id == user_id:
+            return queryset.order_by('-is_pinned', '-created_at')
+        # 否则仅返回公开笔记
+        return queryset.filter(is_private=False).order_by('-is_pinned', '-created_at')
 
 # 用户访问、修改、删除笔记，已验证非笔记所有者用户访问时浏览数增加，剩下的修改和删除未验证
 class NoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Note.objects.all()
     serializer_class = NoteSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
         if self.request.user.is_authenticated:
@@ -194,7 +209,7 @@ class NoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
 # 点赞视图，未验证
 class NoteLikeView(generics.GenericAPIView):
     queryset = Note.objects.all()
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         note = self.get_object()
@@ -214,7 +229,7 @@ class NoteLikeView(generics.GenericAPIView):
 # 评论视图，未验证
 class CommentListCreateView(generics.ListCreateAPIView):
     serializer_class = CommentSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
         note_id = self.kwargs['note_id']
@@ -228,7 +243,7 @@ class CommentListCreateView(generics.ListCreateAPIView):
 class PinNoteView(generics.UpdateAPIView):
     queryset = Note.objects.all()
     serializer_class = NoteSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
     def update(self, request, *args, **kwargs):
         note = self.get_object()
@@ -241,7 +256,7 @@ class PinNoteView(generics.UpdateAPIView):
 # 搜索视图，未验证
 class NoteSearchView(generics.ListAPIView):
     serializer_class = NoteSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
         query = self.request.query_params.get('q', '')

@@ -7,10 +7,10 @@ User = get_user_model()
 
 
 class Note(models.Model):
-    title = models.CharField(max_length=255, verbose_name='标题',default='CKEditor编辑页面')
-    content = models.TextField(blank=True, null=True, verbose_name='内容概括')
+    title = models.CharField(max_length=20, verbose_name='标题')
+    content = models.CharField(max_length=200, verbose_name='内容概括')
     file = models.FileField(upload_to='notes/', blank=True, null=True, verbose_name='笔记文件')
-    category = models.CharField(max_length=255, blank=True, null=True, verbose_name='类别')
+    category = models.CharField(max_length=10, verbose_name='类别')
     is_private = models.BooleanField(default=False, verbose_name='是否私有')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
@@ -20,15 +20,27 @@ class Note(models.Model):
     likes_count = models.PositiveIntegerField(default=0, verbose_name='点赞数')
     comments_count = models.PositiveIntegerField(default=0, verbose_name='评论数')
     is_pinned = models.BooleanField(default=False, verbose_name='是否置顶')
-    cover_image = models.ImageField(upload_to='covers/', null=True, blank=True, verbose_name='封面图片')
-    note_image = models.ImageField(upload_to='note_images/', blank=True, null=True, verbose_name='图片')
+    cover_image = models.ImageField(upload_to='covers/', verbose_name='封面图片')
     note_video = models.FileField(upload_to='note_videos/', blank=True, null=True, verbose_name='视频')
     body = CKEditor5Field('正文内容',config_name='extends')
+    # 新增物化热度字段
+    popularity = models.FloatField(default=0.0)
+
+    def save(self, *args, **kwargs):
+        # 每次保存时更新热度（公式：0.6*v + 0.3*l + 0.1*c）
+        self.popularity = 0.6 * self.views_count + 0.3 * self.likes_count + 0.1 * self.comments_count
+        super().save(*args, **kwargs)
 
     class Meta:
         db_table = 'note'
         verbose_name = '笔记'
         verbose_name_plural = '笔记'
+        indexes = [
+            models.Index(
+                fields=['is_private', '-popularity'],
+                name='idx_note_private_popularity'
+            )
+        ]
 
     def __str__(self):
         return self.title

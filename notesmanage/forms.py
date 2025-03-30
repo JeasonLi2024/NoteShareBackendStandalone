@@ -22,7 +22,7 @@ class CommentForm(forms.ModelForm):
           # fields = ("author", "body")
           fields = [
               'title', 'content', 'file', 'category', 'is_private',
-              'is_pinned', 'cover_image', 'note_image', 'note_video', 'body'
+              'is_pinned', 'cover_image', 'note_video', 'body'
           ]
           widgets = {
               "body": CKEditor5Widget(

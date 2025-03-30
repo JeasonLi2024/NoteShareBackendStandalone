@@ -9,8 +9,12 @@ from django.db.models import Q
 
 @admin.register(Note)
 class NoteAdmin(admin.ModelAdmin):
+    class Media:
+        css = {
+            'all': ('css/ckeditor5_custom.css',)
+        }
     # 列表显示字段
-    list_display = ('id', 'title', 'author', 'views_count', 'created_at', 'is_private', 'body')
+    list_display = ('id', 'title', 'author', 'views_count', 'created_at', 'is_private', 'body', 'popularity')
 
     # 可跳转的字段
     list_display_links = ['id', 'title', 'author']
