@@ -74,8 +74,8 @@ class Comment(models.Model):
         return f'Comment by {self.author.username} on {self.note.title}'
 
 class TopNote(models.Model):
-    note = models.OneToOneField(Note, on_delete=models.CASCADE)
-    popularity = models.FloatField()  # 热度值
+    note = models.OneToOneField(Note, on_delete=models.CASCADE, related_name='top_note')
+    popularity = models.FloatField()
 
     def __str__(self):
-        return f"Top Note: {self.note.title} (Popularity: {self.popularity})"
+        return f"Top Note: {self.note.title} - Popularity: {self.popularity}"

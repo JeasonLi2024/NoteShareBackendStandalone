@@ -1,4 +1,4 @@
-# #使用 Celery 等异步任务队列定期计算热门笔记，并将结果存储在数据库中
+#使用 Celery 等异步任务队列定期计算热门笔记，并将结果存储在数据库中
 # from celery import shared_task
 # from notesmanage.models import Note, TopNote
 # import heapq
@@ -38,16 +38,24 @@
 
 from celery import shared_task
 from django.db.models import F
-from .models import Note
+from .models import Note, TopNote
+import heapq
+
 
 @shared_task
-def periodic_update_popularity():
+def periodic_update_top_notes():
     """
-    定时任务：批量更新所有笔记的热度值
+    定时任务：批量更新所有笔记的热度值，并计算Top 10笔记
     """
-    Note.objects.update(
-        popularity=0.6 * F('views_count') +
-                  0.3 * F('likes_count') +
-                  0.1 * F('comments_count')
-    )
-    print("Popularity update completed!")
+    # 获取Top 10笔记
+    top_10_notes = Note.objects.filter(is_private=False).order_by('-popularity')[:10]
+
+    # 清空旧的TopNote记录
+    TopNote.objects.all().delete()
+
+    # 创建新的TopNote记录
+    for note in top_10_notes:
+        TopNote.objects.create(note=note, popularity=note.popularity)
+
+    print("Top 10 notes updated and saved.")
+

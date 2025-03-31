@@ -380,17 +380,19 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks()
 
 # Celery 配置
-CELERY_BROKER_URL = 'redis://localhost:6379/0'  # 消息代理
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/1' # 结果后端
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True # 连接重试
+CELERY_WORKER_SEND_TASK_EVENTS = False # 任务事件
+CELERY_TASK_TRACK_STARTED = False # 任务开始状态跟踪
+CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0'  # 消息代理
+CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/0' # 结果后端
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Asia/Shanghai'
 
 CELERY_BEAT_SCHEDULE = {
-    'update-top-notes-every-1m': {
-        'task': 'notesmanage.tasks.periodic_update_popularity',
-        'schedule': 600 ,  # 每1分钟执行一次
-        'options': {'queue': 'periodic_tasks'},
+    'update-top-notes-every-30s': {
+        'task': 'notesmanage.tasks.periodic_update_top_notes',
+        'schedule': 30 ,  # 每1分钟执行一次
     },
 }
