@@ -4,16 +4,19 @@ from rest_framework import generics, permissions, status
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import Note, Comment, Like, TopNote
-from .serializers import NoteSerializer, CommentSerializer, NoteSimpleSerializer
-from django.db.models import Q
+from .models import Note, Comment, Like, TopNote, CommentLike
+from .pagination import CommentPagination
+from .serializers import NoteSerializer, CommentSerializer, CreateCommentSerializer, NoteSimpleSerializer, NoteLikeSerializer
+from django.db.models import Q, Prefetch
 from django.http import HttpResponse, Http404
-from .forms import CommentForm
-from django.shortcuts import get_object_or_404, render, redirect
-from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny, IsAuthenticatedOrReadOnly
+from django.shortcuts import get_object_or_404
+from django.db.models import Case, When, F, IntegerField, Max
+from .permissions import IsOwnerOrReadOnly
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAuthenticatedOrReadOnly, IsAdminUser
 import fitz  # PyMuPDF
 import docx
 import markdown
+
 
 # 笔记列表（测试用），已验证
 class NoteListView(APIView):
@@ -28,6 +31,7 @@ class NoteListView(APIView):
             "message": "success",
             "data": serializer.data
         }, status=status.HTTP_200_OK)
+
 
 # 新建笔记，没有在后端可视化验证，可能需要在前端验证，前端可能需要配置CKEDITOR_5
 class NoteCreateView(generics.ListCreateAPIView):
@@ -49,15 +53,17 @@ class NoteCreateView(generics.ListCreateAPIView):
             "data": serializer.data
         }, status=status.HTTP_201_CREATED, headers=headers)
 
+
 # 使用表单经过验证，但网页十分简洁，详见templates目录下的create_note.html（该目录下的另一个文件夹中的.html暂时没有使用）
-def create_note(request):
-    if request.method == 'POST':
-        form = CommentForm(data=request.POST)
-        if form.is_valid():
-            form.save()
-            return render(request, 'form-post-finished.html') # 这个地方的逻辑时提交成功后跳转到一个名为form-post-finished.html的页面，我没有在后端设置，这个相关路由只是为了在后端可视化测试CKEDITOR_5是否可用
-    form = CommentForm()
-    return render(request, 'create_note.html', {'form': form})
+# def create_note(request):
+#     if request.method == 'POST':
+#         form = CommentForm(data=request.POST)
+#         if form.is_valid():
+#             form.save()
+#             return render(request, 'form-post-finished.html') # 这个地方的逻辑时提交成功后跳转到一个名为form-post-finished.html的页面，我没有在后端设置，这个相关路由只是为了在后端可视化测试CKEDITOR_5是否可用
+#     form = CommentForm()
+#     return render(request, 'create_note.html', {'form': form})
+
 
 # 定义了一些预览上传的笔记文件的方法，已验证 （PDF文件有的可以预览内容有的不行）
 def preview_note(request, note_id):
@@ -102,7 +108,9 @@ class TopNotesView(generics.ListAPIView):
 
     def get_queryset(self):
         # 从TopNote模型中获取Top 10笔记
-        return TopNote.objects.order_by('rank')[:10].values_list('note', flat=True)
+        top_notes = TopNote.objects.order_by('rank').select_related('note')[:10]
+        # 提取关联的 Note 对象列表
+        return [tn.note for tn in top_notes]
 
 
 # 按类别进行热度排序并加上了分页处理，已验证
@@ -128,36 +136,36 @@ class NotesByCategoryView(generics.ListAPIView):
 
 
 # 根据热度排出的Top 10，没有采用上面提到的异步处理方案，在每次发送请求时现排，已验证
-class Top10NotesView(generics.ListAPIView):
-    serializer_class = NoteSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+# class Top10NotesView(generics.ListAPIView):
+#     serializer_class = NoteSerializer
+#     permission_classes = [IsAuthenticatedOrReadOnly]
+#
+#     def get_queryset(self):
+#         # 过滤出所有用户的非私有笔记
+#         queryset = Note.objects.filter(is_private=False)
+#
+#         # 定义一个最小堆，用于存储 Top 10 笔记
+#         top_10_notes = []
+#
+#         for note in queryset:
+#             # 计算热度
+#             popularity = 0.6 * note.views_count + 0.3 * note.likes_count + 0.1 * note.comments_count
+#
+#             # 如果堆未满或当前笔记的热度大于堆中的最小值
+#             if len(top_10_notes) < 10 or popularity > top_10_notes[0][0]:
+#                 if len(top_10_notes) == 10:
+#                     # 如果堆已满，移除堆顶元素（最小值）
+#                     heapq.heappop(top_10_notes)
+#                 # 将当前笔记加入堆中
+#                 heapq.heappush(top_10_notes, (popularity, note.id, note))
+#
+#         # 从堆中提取 Top 10 笔记，并按热度降序排序
+#         top_10_notes = [note for _, _, note in heapq.nlargest(10, top_10_notes)]
+#
+#         return top_10_notes
 
-    def get_queryset(self):
-        # 过滤出所有用户的非私有笔记
-        queryset = Note.objects.filter(is_private=False)
 
-        # 定义一个最小堆，用于存储 Top 10 笔记
-        top_10_notes = []
-
-        for note in queryset:
-            # 计算热度
-            popularity = 0.6 * note.views_count + 0.3 * note.likes_count + 0.1 * note.comments_count
-
-            # 如果堆未满或当前笔记的热度大于堆中的最小值
-            if len(top_10_notes) < 10 or popularity > top_10_notes[0][0]:
-                if len(top_10_notes) == 10:
-                    # 如果堆已满，移除堆顶元素（最小值）
-                    heapq.heappop(top_10_notes)
-                # 将当前笔记加入堆中
-                heapq.heappush(top_10_notes, (popularity, note.id, note))
-
-        # 从堆中提取 Top 10 笔记，并按热度降序排序
-        top_10_notes = [note for _, _, note in heapq.nlargest(10, top_10_notes)]
-
-        return top_10_notes
-
-
-# 列出某个用户的所有公开笔记，并按是否置顶和创建时间进行排序，未完全验证（需要在更多测试数据下进行）
+# 列出某个用户的所有公开笔记（或者用户本人的所有笔记），并按是否置顶和创建时间进行排序，已验证
 class UserNotesView(generics.ListAPIView):
     serializer_class = NoteSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
@@ -172,6 +180,7 @@ class UserNotesView(generics.ListAPIView):
             return queryset.order_by('-is_pinned', '-created_at')
         # 否则仅返回公开笔记
         return queryset.filter(is_private=False).order_by('-is_pinned', '-created_at')
+
 
 # 用户访问、修改、删除笔记，已验证非笔记所有者用户访问时浏览数增加，剩下的修改和删除未验证
 class NoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
@@ -228,7 +237,7 @@ class NoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
         }, status=status.HTTP_204_NO_CONTENT)
 
 
-# 点赞视图，未验证
+# 点赞视图，已验证
 class NoteLikeView(generics.GenericAPIView):
     queryset = Note.objects.all()
     permission_classes = [IsAuthenticated]
@@ -236,45 +245,116 @@ class NoteLikeView(generics.GenericAPIView):
     def post(self, request, *args, **kwargs):
         note = self.get_object()
         user = request.user
-        if not note.likes.filter(id=user.id).exists():
-            note.likes.add(user)  # 直接操作多对多关系
+
+        # 检查是否已点赞
+        if not Like.objects.filter(note=note, user=user).exists():
+            Like.objects.create(note=note, user=user)  # 通过中间模型创建关联
             return Response({'detail': 'Liked'}, status=status.HTTP_201_CREATED)
         return Response({'detail': 'Already liked'}, status=status.HTTP_200_OK)
 
     def delete(self, request, *args, **kwargs):
         note = self.get_object()
         user = request.user
-        if note.likes.filter(id=user.id).exists():
-            note.likes.remove(user)  # 直接移除关联
+
+        # 精确删除当前用户的点赞记录
+        deleted, _ = Like.objects.filter(note=note, user=user).delete()
+        if deleted > 0:
             return Response({'detail': 'Unliked'}, status=status.HTTP_204_NO_CONTENT)
         return Response({'detail': 'Not liked'}, status=status.HTTP_200_OK)
+
+
+# 获取用户点赞过的笔记
+class UserLikedNotesView(generics.ListAPIView):
+    serializer_class = NoteLikeSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # 获取当前用户点赞的所有笔记（通过反向关联）
+        return (
+            self.request.user.liked_notes
+            .select_related('author')  # 预加载作者信息
+            .prefetch_related('likes')  # 预加载点赞关系
+            .annotate_liked_time(self.request.user)
+        )
+
+    def get_serializer_context(self):
+        # 传递request对象用于构建完整URL
+        return {'request': self.request}
+
 
 # 评论视图，未验证
 class CommentListCreateView(generics.ListCreateAPIView):
     serializer_class = CommentSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    pagination_class = CommentPagination
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
-        note_id = self.kwargs['note_id']
-        return Comment.objects.filter(note_id=note_id)
+        """优化查询逻辑，获取扁平化评论结构"""
+        return (
+            Comment.objects
+            .filter(note_id=self.kwargs['note_id'])
+            .select_related('user', 'parent_comment__user')
+            .prefetch_related(
+                Prefetch('replies',
+                    queryset=Comment.objects
+                        .select_related('user', 'parent_comment__user')
+                        .only('id', 'content', 'created_at', 'user_id',
+                              'parent_comment_id', 'user__username')
+                )
+            )
+            .annotate(
+                real_parent=Case(
+                    When(parent_comment__parent_comment__isnull=False,
+                         then=F('parent_comment__parent_comment')),
+                    default=F('parent_comment'),
+                    output_field=IntegerField()
+                )
+            )
+            .order_by('real_parent', 'created_at')
+        )
 
-    def perform_create(self, serializer):
-        note_id = self.kwargs['note_id']
-        serializer.save(author=self.request.user, note_id=note_id)
+class CommentDestroyView(generics.DestroyAPIView):
+    queryset = Comment.objects.all()
+    serializer_class = CommentSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrReadOnly, IsAdminUser]
 
-# 置顶视图，感觉不需要单独设计此功能的视图，在模型中已添加该类型字段
-class PinNoteView(generics.UpdateAPIView):
-    queryset = Note.objects.all()
-    serializer_class = NoteSerializer
+class CommentLikeView(generics.GenericAPIView):
+    queryset = Comment.objects.all()
     permission_classes = [IsAuthenticated]
 
-    def update(self, request, *args, **kwargs):
-        note = self.get_object()
-        if note.author == request.user:
-            note.is_pinned = not note.is_pinned
-            note.save()
-            return Response({'detail': 'Pinned' if note.is_pinned else 'Unpinned'}, status=status.HTTP_200_OK)
-        return Response({'detail': 'You are not the author of this note'}, status=status.HTTP_403_FORBIDDEN)
+    def post(self, request, *args, **kwargs):
+        comment = self.get_object()
+        if not comment.commentlike_set.filter(user=request.user).exists():
+            CommentLike.objects.create(user=request.user, comment=comment)
+            comment.likes_count = comment.commentlike_set.count()
+            comment.save()
+            return Response({'detail': 'Liked'}, status=201)
+        return Response({'detail': 'Already liked'}, status=200)
+
+    def delete(self, request, *args, **kwargs):
+        comment = self.get_object()
+        like = comment.commentlike_set.filter(user=request.user).first()
+        if like:
+            like.delete()
+            comment.likes_count = comment.commentlike_set.count()
+            comment.save()
+            return Response(status=204)
+        return Response({'detail': 'Not liked'}, status=400)
+
+
+# 置顶视图，感觉不需要单独设计此功能的视图，在模型中已添加该类型字段
+# class PinNoteView(generics.UpdateAPIView):
+#     queryset = Note.objects.all()
+#     serializer_class = NoteSerializer
+#     permission_classes = [IsAuthenticated]
+#
+#     def update(self, request, *args, **kwargs):
+#         note = self.get_object()
+#         if note.author == request.user:
+#             note.is_pinned = not note.is_pinned
+#             note.save()
+#             return Response({'detail': 'Pinned' if note.is_pinned else 'Unpinned'}, status=status.HTTP_200_OK)
+#         return Response({'detail': 'You are not the author of this note'}, status=status.HTTP_403_FORBIDDEN)
 
 # 搜索视图，未验证
 class NoteSearchView(generics.ListAPIView):
@@ -291,7 +371,7 @@ class NoteSearchView(generics.ListAPIView):
         return Note.objects.filter(is_private=False).order_by('-created_at')
 
 # 笔记详情视图，是否需要有待验证，原先的想法是利用此功能实现用户访问其他人的笔记时可以看到对方笔记的详细内容，但AI给的这个代码实现了类似管理员的视角，显然有点问题哈哈
-class NoteDetailView(RetrieveAPIView):
-    queryset = Note.objects.all()
-    serializer_class = NoteSerializer
-    lookup_field = 'id'
+# class NoteDetailView(RetrieveAPIView):
+#     queryset = Note.objects.all()
+#     serializer_class = NoteSerializer
+#     lookup_field = 'id'

@@ -1,0 +1,2 @@
+   # templates/notifications/reply.txt
+   {{ sender.username }} 回复了你的评论: {{ comment.content }}

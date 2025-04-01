@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django_ckeditor_5.fields import CKEditor5Field
 from django_ckeditor_5.widgets import CKEditor5Widget
-from .models import Note, TopNote
+from .models import Note, TopNote, Comment
 from django.core.mail import send_mail
 from django.conf import settings
 from django.db.models import Q
@@ -85,3 +85,12 @@ class TopNoteAdmin(admin.ModelAdmin):
         return obj.note.category
 
     note_category.short_description = '笔记类别'
+
+
+@admin.register(Comment)
+class CommentAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'note', 'created_at', 'content')
+
+    search_fields = ('author__username', 'note__title')
+
+    list_filter = ('created_at',)

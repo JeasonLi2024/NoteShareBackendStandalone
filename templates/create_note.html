@@ -1,0 +1,35 @@
+{#{% extends "newdesign/newbase.html" %}#}
+{##}
+{#{% block mytitle %}#}
+{#    <title>Ckeditor富文本编辑</title>#}
+{#{% endblock %}#}
+{##}
+{#{% block maincontent %}#}
+{#    <div class="row">#}
+{#        <form method="post" class="form-horizontal" enctype="multipart/form-data">#}
+{#            {% csrf_token %}#}
+{#            <p>标题： {{ form.title|safe }}</p>#}
+{#            <p>文章内容：</p>#}
+{#            {{ form.content|safe }}#}
+{#            {{ form.media }}#}
+{#            <input type="submit" value="Submit">#}
+{#        </form>#}
+{#    </div>#}
+{#{% endblock %}#}
+
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="{% static 'django_ckeditor_5/css/styles.css' %}">
+</head>
+<body>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {{ form.media }}  <!-- 必须加载媒体文件 -->
+        {{ form.as_p }}
+        <button type="submit">提交</button>
+    </form>
+    <script src="{% static 'django_ckeditor_5/js/ckeditor-5-init.js' %}"></script>
+</body>
+</html>

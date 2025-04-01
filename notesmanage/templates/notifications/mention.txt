@@ -1,0 +1,2 @@
+   # templates/notifications/mention.txt
+   {{ sender.username }} 在评论中提到了你: {{ comment.content }}

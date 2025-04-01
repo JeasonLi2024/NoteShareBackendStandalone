@@ -37,9 +37,10 @@ ALLOWED_HOSTS = ['10.29.118.199', '127.0.0.1']
 load_dotenv()
 # 获取环境变量
 DB_PASSWORD = os.getenv('DB_PASSWORD')
+DB_NAME = os.getenv('NAME')
+DB_USER= os.getenv('USER')
 
 # Application definition
-
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -142,8 +143,8 @@ FILTERS_DEFAULT_LOOKUP_EXPR = 'icontains'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'note_share_db',
-        'USER': 'root',
+        'NAME': DB_NAME,
+        'USER': DB_USER,
         'PASSWORD': DB_PASSWORD,
         'HOST': '127.0.0.1',
     }

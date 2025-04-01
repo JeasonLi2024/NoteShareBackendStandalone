@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block mytitle %}默认标题{% endblock %}</title>
+    <!-- 引入 CSS 文件 -->
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'css/bootstrap.min.css' %}">
+    <link rel="stylesheet" href="{% static 'css/custom.css' %}">
+</head>
+<body>
+<header>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <a class="navbar-brand" href="#">笔记管理系统</a>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav">
+                <li class="nav-item active">
+                    <a class="nav-link" href="#">首页</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#">创建笔记</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#">我的笔记</a>
+                </li>
+            </ul>
+        </div>
+    </nav>
+</header>
+
+<main>
+    <div class="container">
+        {% block maincontent %}
+            <!-- 默认内容 -->
+        {% endblock %}
+    </div>
+</main>
+
+<footer>
+    <p>&copy; 2023 笔记管理系统. All rights reserved.</p>
+</footer>
+
+<!-- 引入 JavaScript 文件 -->
+<script src="{% static 'js/jquery-3.5.1.min.js' %}"></script>
+<script src="{% static 'js/bootstrap.min.js' %}"></script>
+<script src="{% static 'django_ckeditor_5/ckeditor.js' %}"></script>
+</body>
+</html>
