@@ -73,11 +73,12 @@ class LoginSerializer(serializers.Serializer):
         if user:
             print(f"Found user: {user.username}, is_active: {user.is_active}")
             if user.check_password(password):
-                return user
+                data['user'] = user  # 将用户对象添加到 validated_data
+                return data
             else:
-                print("Password does not match.")
+                print("密码输入错误，请重试。")
         else:
-            print("No user found with the provided information.")
+            print("没用当前用户信息。")
 
         raise serializers.ValidationError("无法使用提供的信息登录。")
 

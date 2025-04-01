@@ -24,12 +24,12 @@ class Note(models.Model):
     note_video = models.FileField(upload_to='note_videos/', blank=True, null=True, verbose_name='视频')
     body = CKEditor5Field('正文内容',config_name='extends')
     # 新增物化热度字段
-    popularity = models.FloatField(default=0.0)
+    popularity = models.FloatField(default=0.0, verbose_name='热度')
 
-    def save(self, *args, **kwargs):
-        # 每次保存时更新热度（公式：0.6*v + 0.3*l + 0.1*c）
-        self.popularity = 0.6 * self.views_count + 0.3 * self.likes_count + 0.1 * self.comments_count
-        super().save(*args, **kwargs)
+    # def save(self, *args, **kwargs):
+    #     # 每次保存时更新热度（公式：0.6*v + 0.3*l + 0.1*c）
+    #     self.popularity = 0.6 * self.views_count + 0.3 * self.likes_count + 0.1 * self.comments_count
+    #     super().save(*args, **kwargs)
 
     class Meta:
         db_table = 'note'
@@ -75,7 +75,10 @@ class Comment(models.Model):
 
 class TopNote(models.Model):
     note = models.OneToOneField(Note, on_delete=models.CASCADE, related_name='top_note')
-    popularity = models.FloatField()
+    popularity = models.FloatField(verbose_name='热度')
+    rank = models.IntegerField(verbose_name='排名')  # 添加 rank 字段
 
     def __str__(self):
         return f"Top Note: {self.note.title} - Popularity: {self.popularity}"
+
+

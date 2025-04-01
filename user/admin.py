@@ -60,7 +60,7 @@ class CustomUserAdmin(admin.ModelAdmin):
     add_form = UserCreationForm
 
     # 列表页显示的字段
-    list_display = ['id', 'username', 'phone', 'email', 'school', 'major', 'reset_password']
+    list_display = ['id', 'username', 'phone', 'email', 'last_login', 'school', 'major', 'reset_password']
 
     # 可跳转的字段
     list_display_links = ['id', 'username']

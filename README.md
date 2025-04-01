@@ -72,7 +72,7 @@ ping #在命令中输入ping命令来检测redis服务器与redis客户端的连
 
 #### celery 启动和异步任务的运行
 ```shell
-celery -A NoteShareBackend worker --loglevel=info 
+celery -A NoteShareBackend worker -l info -P eventlet
 celery -A NoteShareBackend beat --loglevel=info
 ```
 

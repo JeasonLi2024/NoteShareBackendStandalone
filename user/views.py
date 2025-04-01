@@ -17,6 +17,7 @@ import random
 from django.core.cache import cache
 from rest_framework.exceptions import ValidationError
 from django.utils.translation import override
+from django.utils import timezone
 
 
 User = get_user_model()
@@ -128,7 +129,9 @@ class LoginView(APIView):
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
-            user = serializer.validated_data
+            user = serializer.validated_data['user']
+            user.last_login = timezone.now()  # 使用 Django 的时区工具
+            user.save(update_fields=['last_login'])  # 仅更新指定字段
             refresh = RefreshToken.for_user(user)
             return Response({
                 "code": status.HTTP_200_OK,

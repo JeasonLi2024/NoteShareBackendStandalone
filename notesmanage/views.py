@@ -5,7 +5,7 @@ from rest_framework.generics import RetrieveAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .models import Note, Comment, Like, TopNote
-from .serializers import NoteSerializer, CommentSerializer
+from .serializers import NoteSerializer, CommentSerializer, NoteSimpleSerializer
 from django.db.models import Q
 from django.http import HttpResponse, Http404
 from .forms import CommentForm
@@ -95,22 +95,37 @@ def preview_note(request, note_id):
         raise Http404("Unsupported file type.")
 
 
-# 异步功能根据热度排出的Top 10，未测试
-# class TopNotesView(generics.ListAPIView):
-#     serializer_class = NoteSerializer
-#     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-#
-#     def get_queryset(self):
-#         # 直接从TopNote模型中获取热门笔记
-#         return TopNote.objects.all().values_list('note', flat=True)
-
+# 异步功能根据热度排出的Top 10，已验证并推荐使用
 class TopNotesView(generics.ListAPIView):
-    serializer_class = NoteSerializer
+    serializer_class = NoteSimpleSerializer
     permission_classes = [AllowAny]
 
     def get_queryset(self):
-        # 直接通过索引快速定位 Top 10
-        return Note.objects.filter(is_private=False).order_by('-popularity')[:10]
+        # 从TopNote模型中获取Top 10笔记
+        return TopNote.objects.order_by('rank')[:10].values_list('note', flat=True)
+
+
+# 按类别进行热度排序并加上了分页处理，已验证
+class NotesByCategoryView(generics.ListAPIView):
+    serializer_class = NoteSimpleSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        category = self.kwargs['category']
+        page_number = self.kwargs.get('page_number', 1)
+        page_size = self.kwargs.get('page_size', 10)
+
+        # 从TopNote模型中获取指定类别的笔记
+        top_notes = TopNote.objects.filter(note__category=category).order_by('rank')
+
+        # 使用 Paginator 进行分页
+        from django.core.paginator import Paginator
+        paginator = Paginator(top_notes, page_size)
+        page = paginator.get_page(page_number)
+
+        # 返回当前页的笔记对象列表
+        return [top_note.note for top_note in page.object_list]
+
 
 # 根据热度排出的Top 10，没有采用上面提到的异步处理方案，在每次发送请求时现排，已验证
 class Top10NotesView(generics.ListAPIView):
@@ -165,9 +180,15 @@ class NoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
-        if self.request.user.is_authenticated:
-            return Note.objects.filter(author=self.request.user)
-        return Note.objects.filter(is_private=False)
+        user = self.request.user
+        if user.is_authenticated:
+            # 允许访问：自己的所有笔记 + 其他用户的公开笔记
+            return Note.objects.filter(
+                Q(author=user) | Q(is_private=False)
+            )
+        else:
+            # 未登录用户只能访问公开笔记
+            return Note.objects.filter(is_private=False)
 
     #retrieve方法处理 GET 请求，如果请求用户不是笔记的作者，则增加笔记的浏览数，并返回笔记信息
     def retrieve(self, request, *args, **kwargs):
@@ -176,7 +197,8 @@ class NoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
         if request.user != instance.author:
             instance.views_count += 1
             instance.save()
-        serializer = self.get_serializer(instance)
+        serializer = self.get_serializer(instance, context={'request': request})
+        # serializer = self.get_serializer(instance)
         return Response({
             "code": status.HTTP_200_OK,
             "message": "Note retrieved successfully",
@@ -213,16 +235,17 @@ class NoteLikeView(generics.GenericAPIView):
 
     def post(self, request, *args, **kwargs):
         note = self.get_object()
-        if not note.likes.filter(id=request.user.id).exists():
-            Like.objects.create(user=request.user, note=note)
+        user = request.user
+        if not note.likes.filter(id=user.id).exists():
+            note.likes.add(user)  # 直接操作多对多关系
             return Response({'detail': 'Liked'}, status=status.HTTP_201_CREATED)
         return Response({'detail': 'Already liked'}, status=status.HTTP_200_OK)
 
     def delete(self, request, *args, **kwargs):
         note = self.get_object()
-        like = Like.objects.filter(user=request.user, note=note).first()
-        if like:
-            like.delete()
+        user = request.user
+        if note.likes.filter(id=user.id).exists():
+            note.likes.remove(user)  # 直接移除关联
             return Response({'detail': 'Unliked'}, status=status.HTTP_204_NO_CONTENT)
         return Response({'detail': 'Not liked'}, status=status.HTTP_200_OK)
 

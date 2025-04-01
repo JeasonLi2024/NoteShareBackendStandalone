@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django_ckeditor_5.fields import CKEditor5Field
 from django_ckeditor_5.widgets import CKEditor5Widget
-from .models import Note
+from .models import Note, TopNote
 from django.core.mail import send_mail
 from django.conf import settings
 from django.db.models import Q
@@ -14,7 +14,7 @@ class NoteAdmin(admin.ModelAdmin):
             'all': ('css/ckeditor5_custom.css',)
         }
     # 列表显示字段
-    list_display = ('id', 'title', 'author', 'views_count', 'created_at', 'is_private', 'body', 'popularity')
+    list_display = ('id', 'title', 'author', 'views_count', 'category', 'created_at', 'is_private', 'body', 'popularity')
 
     # 可跳转的字段
     list_display_links = ['id', 'title', 'author']
@@ -54,3 +54,34 @@ class NoteAdmin(admin.ModelAdmin):
     formfield_overrides = {
         CKEditor5Field: {'widget': CKEditor5Widget(config_name='extends')}
     }
+
+@admin.register(TopNote)
+class TopNoteAdmin(admin.ModelAdmin):
+    # 列表显示字段
+    list_display = ('note_id', 'note_title', 'note_category', 'popularity', 'rank')
+
+    # 可跳转的字段
+    list_display_links = ['note_id', 'note_title']
+
+    # 过滤器
+    list_filter = ('note__category',)
+
+    # 搜索字段
+    search_fields = ('note__title', 'note__category')
+
+    # 只读字段
+    readonly_fields = ('note_id', 'note_title', 'popularity', 'rank')
+
+    # 排序
+    ordering = ('rank',)
+
+    # 自定义方法（可选）
+    def note_title(self, obj):
+        return obj.note.title
+
+    note_title.short_description = '笔记标题'
+
+    def note_category(self, obj):
+        return obj.note.category
+
+    note_category.short_description = '笔记类别'
