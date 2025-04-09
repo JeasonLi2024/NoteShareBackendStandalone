@@ -23,7 +23,7 @@ class NoteAdmin(admin.ModelAdmin):
     list_filter = ('is_private', 'created_at')
 
     # 搜索字段
-    search_fields = ('title', 'content', 'author__username', 'body')
+    search_fields = ('title', 'content', 'author__username', 'body', 'category')
 
     # 只读字段
     readonly_fields = ('created_at', 'updated_at')
@@ -48,7 +48,8 @@ class NoteAdmin(admin.ModelAdmin):
         # 使用Q对象构建复杂的查询条件
         queries = (Q(title__icontains=search_term) |
                    Q(author__username__icontains=search_term) |
-                   Q(body__icontains=search_term))  # 添加对 body 字段的模糊搜索
+                   Q(body__icontains=search_term) |  # 继续保持对body字段的模糊搜索
+                   Q(category__icontains=search_term))  # 新增：基于category字段的模糊搜索
         return queryset.filter(queries), False  # 返回新的queryset以及是否可能有重复结果
 
     formfield_overrides = {
@@ -89,8 +90,17 @@ class TopNoteAdmin(admin.ModelAdmin):
 
 @admin.register(Comment)
 class CommentAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'note', 'created_at', 'content')
+    list_display = ('id', 'user', 'note', 'created_at', 'content', 'like_count', 'dislike_count', 'parent')
+
+    list_display_links = ['id', 'user', 'content']
 
     search_fields = ('author__username', 'note__title')
 
     list_filter = ('created_at',)
+
+    # readonly_fields = ('like_count',)
+
+    def like_count(self, obj):
+        return obj.like_count
+    like_count.short_description = '点赞数'
+

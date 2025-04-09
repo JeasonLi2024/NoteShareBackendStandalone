@@ -6,102 +6,78 @@ import pytz
 
 User = get_user_model()
 
-
-class UserBriefSerializer(serializers.ModelSerializer):
+class UserSerializer(serializers.ModelSerializer):
+    avatar = serializers.SerializerMethodField()
     class Meta:
         model = User
         fields = ['id', 'username', 'avatar']
 
     def get_avatar(self, obj):
         request = self.context.get('request')
+        # 假设 avatar 是一个 ImageField 或者其他类型的字段
+        # 返回头像的 URL 或其他相关信息
         if obj.avatar:
-            return request.build_absolute_uri(obj.avatar.url) if request else obj.avatar.url
+            return request.build_absolute_uri(obj.avatar.url)
         return None
 
 
 class CommentSerializer(serializers.ModelSerializer):
-    user = UserBriefSerializer(read_only=True)
-    reply_to_user = serializers.SerializerMethodField()  # 新增回复目标用户字段
+    note = serializers.PrimaryKeyRelatedField(read_only=True)  # 不让前端传递
+    user = UserSerializer(read_only=True)
+    like_count = serializers.IntegerField(source='annotated_likes', read_only=True)
+    dislike_count = serializers.IntegerField(read_only=True)
     is_liked = serializers.SerializerMethodField()
-    likes_count = serializers.IntegerField(read_only=True)
-    replies = serializers.SerializerMethodField()
+    is_disliked = serializers.SerializerMethodField()
+    display_content = serializers.SerializerMethodField()
+    top_replies = serializers.SerializerMethodField()
+    total_replies = serializers.SerializerMethodField()
 
     class Meta:
         model = Comment
         fields = [
-            'id', 'user', 'content', 'likes_count', 'is_liked',
-            'created_at', 'parent_comment', 'reply_to_user', 'replies'
+            'id', 'note', 'user', 'parent', 'content', 'dislike_count','created_at',
+            'updated_at', 'like_count', 'is_liked', 'is_disliked', 'display_content', 'top_replies', 'total_replies'
         ]
-        extra_kwargs = {
-            'parent_comment': {'write_only': True}
-        }
+        read_only_fields = ['id', 'user', 'created_at', 'updated_at', 'like_count', 'is_liked', 'is_disliked']
 
-    def get_replies(self, obj):
-        """获取扁平化的子评论列表"""
-        request = self.context.get('request')
-
-        # 获取所有直接子评论（不限制层级）
-        child_comments = obj.replies.all().select_related('user', 'parent_comment__user')
-
+    def get_top_replies(self, obj):
+        replies = getattr(obj, 'filtered_replies', [])[:5]
         return CommentSerializer(
-            child_comments,
+            replies,
             many=True,
-            context={'request': request}
+            context=self.context
         ).data
 
-    def get_reply_to_user(self, obj):
-        """获取被回复用户信息"""
-        if obj.parent_comment:
-            return UserBriefSerializer(
-                obj.parent_comment.user,
-                context={'request': self.context.get('request')}
-            ).data
-        return None
+    def get_total_replies(self, obj):
+        # 获取该根评论的总回复数
+        return obj.replies.count()
 
     def get_is_liked(self, obj):
-        # 原有逻辑保持不变
         request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            return obj.commentlike_set.filter(user=request.user).exists()
-        return False
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.likes.filter(id=request.user.id).exists()
 
-    def to_representation(self, instance):
-        """重写展示逻辑，处理内容格式化"""
-        data = super().to_representation(instance)
+    def get_is_disliked(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.dislikes.filter(id=request.user.id).exists()
 
-        # 如果是子评论且需要显示回复关系
-        if instance.parent_comment and instance.parent_comment.parent_comment:
-            parent_user = instance.parent_comment.user
-            data['content'] = f"回复@{parent_user.username}：{data['content']}"
+    def get_display_content(self, obj):
+        """根据不喜欢状态返回不同内容"""
+        if self.get_is_disliked(obj):
+            return "该评论被折叠"
+        return obj.get_display_content()  # 保持原有显示逻辑
 
-        # 移除嵌套层级结构
-        if instance.parent_comment and instance.parent_comment.parent_comment:
-            data['parent_comment'] = instance.parent_comment.parent_comment.id
-
+    def validate(self, data):
+        # 不再限制回复层级，允许对任何评论进行回复
         return data
 
-
-class CreateCommentSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Comment
-        fields = ['content', 'parent_comment']
-
-    def validate_parent_comment(self, value):
-        """验证评论层级不超过两级"""
-        if value and value.parent_comment:
-            raise serializers.ValidationError("评论层级不能超过两级")
-        return value
-
     def create(self, validated_data):
-        """创建评论时自动处理内容格式"""
-        parent_comment = validated_data.get('parent_comment')
-
-        if parent_comment:
-            # 自动添加回复前缀
-            prefix = f"回复@{parent_comment.user.username}："
-            if not validated_data['content'].startswith(prefix):
-                validated_data['content'] = prefix + validated_data['content']
-
+        # 自动设置评论作者
+        request = self.context.get('request')
+        validated_data['user'] = request.user
         return super().create(validated_data)
 
 
@@ -150,7 +126,7 @@ class NoteSerializer(serializers.ModelSerializer):
             return obj.likes.filter(id=user.id).exists()
         return False
 
-
+# 简化笔记信息
 class NoteSimpleSerializer(serializers.ModelSerializer):
     author_username = serializers.ReadOnlyField(source='author.username')
     avatar = serializers.SerializerMethodField()
@@ -160,7 +136,7 @@ class NoteSimpleSerializer(serializers.ModelSerializer):
         model = Note
         fields = [
             'id', 'author_username', 'avatar', 'cover_image', 'likes_count',
-            'views_count', 'popularity', 'title', 'content'
+            'views_count', 'popularity', 'title', 'content', 'comments_count'
         ]
 
     def get_avatar(self, obj):
@@ -213,18 +189,18 @@ class NoteLikeSerializer(serializers.ModelSerializer):
         else:
             return None
 
-class NotificationSerializer(serializers.ModelSerializer):
-    sender = UserBriefSerializer()
-    comment = CommentSerializer()
-
-    class Meta:
-        model = Notification
-        fields = [
-            'id',
-            'notification_type',
-            'content',
-            'is_read',
-            'created_at',
-            'sender',
-            'comment'
-        ]
+# class NotificationSerializer(serializers.ModelSerializer):
+#     sender = CommentUserSerializer()
+#     comment = CommentSerializer()
+#
+#     class Meta:
+#         model = Notification
+#         fields = [
+#             'id',
+#             'notification_type',
+#             'content',
+#             'is_read',
+#             'created_at',
+#             'sender',
+#             'comment'
+#         ]

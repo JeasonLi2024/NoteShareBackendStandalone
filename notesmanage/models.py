@@ -1,10 +1,14 @@
-
 from django.db import models
 from django.contrib.auth import get_user_model
 from django_ckeditor_5.fields import CKEditor5Field#富文本编辑器
 from django.db.models import OuterRef, Subquery
+from django.core.cache import cache
+from django.db.models import Case, When, F, IntegerField, CharField, Value
+
+from model_utils import FieldTracker
 
 User = get_user_model()
+
 
 # 自定义获取笔记liked_time方式
 class NoteQuerySet(models.QuerySet):
@@ -17,7 +21,8 @@ class NoteQuerySet(models.QuerySet):
         )
         return self.annotate(liked_time=Subquery(subquery))
 
-# Note模型
+
+# 笔记模型
 class Note(models.Model):
     title = models.CharField(max_length=20, verbose_name='标题')
     content = models.CharField(max_length=200, verbose_name='内容概括')
@@ -38,6 +43,10 @@ class Note(models.Model):
     popularity = models.FloatField(default=0.0, verbose_name='热度')
 
     objects = NoteQuerySet.as_manager()  # 替换默认管理器
+    tracker = FieldTracker(fields=['views_count', 'likes_count', 'comments_count'])
+
+    def calculate_popularity(self):
+        return 0.6 * self.views_count + 0.3 * self.likes_count + 0.1 * self.comments_count
 
     class Meta:
         db_table = 'note'
@@ -62,6 +71,7 @@ class Note(models.Model):
             'avatar': self.author.avatar.url if self.author.avatar else None
         }
 
+
 # 笔记Like模型
 class Like(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -72,31 +82,6 @@ class Like(models.Model):
         unique_together = ('user', 'note')
         ordering = ['-created_at']
 
-# 笔记评论模型
-class Comment(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comments')
-    note = models.ForeignKey('Note', on_delete=models.CASCADE, related_name='comments')
-    content = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name='评论发布时间')
-    # 用于实现评论的嵌套结构，允许回复其他评论
-    parent_comment = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='replies')
-    likes_count = models.PositiveIntegerField(default=0)
-
-    class Meta:
-        verbose_name_plural = '评论管理'
-        ordering = ['-created_at']
-
-    def __str__(self):
-        return f"Comment by {self.user.username} on {self.note.title}"
-
-# 笔记评论点赞模型
-class CommentLike(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    comment = models.ForeignKey(Comment, on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ('user', 'comment')
 
 # 笔记热度排序模型
 class TopNote(models.Model):
@@ -109,6 +94,71 @@ class TopNote(models.Model):
 
     def __str__(self):
         return f"Top Note: {self.note.title} - Popularity: {self.popularity}"
+
+
+class Comment(models.Model):
+    note = models.ForeignKey(Note, on_delete=models.CASCADE, related_name='comments', verbose_name='笔记')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='用户')
+    parent = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.CASCADE,  # 保持级联删除
+        related_name='replies'
+    )
+    content = models.TextField(verbose_name='评论内容')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True)
+    likes = models.ManyToManyField(User, related_name='liked_comments', blank=True)
+    dislikes = models.ManyToManyField(User, related_name='disliked_comments', blank=True)
+
+    def __str__(self):
+        return f"Comment({self.user}, {self.content[:20]})"
+    # 缓存查询结果
+    def get_all_descendants(self):
+        """递归获取所有后代评论（平铺列表）"""
+        cache_key = f'comment_{self.id}_descendants'
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+        descendants = []
+        current_level = self.replies.all()
+        while current_level.exists():
+            descendants.extend(current_level)
+            current_level = Comment.objects.filter(parent__in=current_level)
+        cache.set(cache_key, descendants, 60 * 15)  # 缓存15分钟
+        return descendants
+
+    def get_all_replies(self):
+        """递归获取所有回复（现在直接通过级联删除自动处理）"""
+        all_replies = []
+        for reply in self.replies.all().order_by('created_at'):
+            all_replies.append(reply)
+            all_replies.extend(reply.get_all_replies())
+        return all_replies
+
+    def get_display_content(self):
+        """决定评论显示内容的逻辑"""
+        if not self.parent:
+            return self.content
+        elif self.parent and not self.parent.parent:
+            return self.content
+        else:
+            return f"{self.user.username} 回复 {self.parent.user.username}：{self.content}"
+
+    @property
+    def like_count(self):
+        return self.likes.count()
+
+    @property
+    def dislike_count(self):
+        return self.dislikes.count()
+
+    class Meta:
+        verbose_name_plural = '笔记评论管理'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['parent']),  # 加速层级查询
+            models.Index(fields=['-created_at']),
+        ]
+
 
 # 通知模型
 class Notification(models.Model):

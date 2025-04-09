@@ -10,7 +10,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = UserModel
         fields = (
             'id', 'username', 'email', 'avatar', 'phone', 'created_at', 'last_login',
-            'school', 'major', 'grade'  # 添加新的字段
+            'school', 'major', 'grade', 'introduction'  # 添加新的字段
         )
         extra_kwargs = {'password': {'write_only': True}}
         read_only_fields = ('created_at', 'last_login')
