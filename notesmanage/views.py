@@ -11,12 +11,20 @@ from .pagination import SubCommentPagination, RootCommentPagination
 from django.core.paginator import Paginator
 from rest_framework.pagination import PageNumberPagination
 from .serializers import NoteSerializer, CommentSerializer, NoteSimpleSerializer, NoteLikeSerializer
-from django.db.models import Q, Prefetch, Count, OuterRef, Subquery
+from django.db.models import (
+    F, Func, Count, Case, When, Value,
+    IntegerField, FloatField, ExpressionWrapper,
+    Prefetch
+)
+from .utils import UnixTimestamp
 from django.http import HttpResponse, Http404
 from django.shortcuts import get_object_or_404
+from django.db.models.functions import Now, Extract
+from django.utils import timezone
+from datetime import timedelta
 from django.db import connection
 from django.contrib.auth import get_user_model
-from django.db.models import Case, When, F, IntegerField, Max
+from django.db.models import Count, F, ExpressionWrapper, IntegerField, FloatField, Case, When, Value, Q
 from .permissions import IsOwnerOrReadOnly
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAuthenticatedOrReadOnly, IsAdminUser
 import fitz  # PyMuPDF
@@ -287,7 +295,6 @@ class UserLikedNotesView(generics.ListAPIView):
         return {'request': self.request}
 
 
-# 评论视图（已有分页处理，只显示根评论）
 class CommentListCreateView(generics.ListCreateAPIView):
     serializer_class = CommentSerializer
     permission_classes = [IsAuthenticated]
@@ -295,94 +302,52 @@ class CommentListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         note_id = self.kwargs['note_id']
-        user = self.request.user
+        qs = Comment.objects.filter(note_id=note_id, parent__isnull=True)
 
-        # 修改注解字段名称为 annotated_likes
-        base_qs = Comment.objects.filter(
-            note_id=note_id,
-            parent__isnull=True
+        # 使用 MySQL 兼容的时间戳注解
+        qs = qs.annotate(
+            annotated_likes=Count('likes'),
+            created_ts=UnixTimestamp(F('created_at'))  # 关键修改
         ).annotate(
-            annotated_likes=Count('likes'),  # 关键修改点
-            total_replies=Count('replies')
+            sort_group=Case(
+                When(is_refreshed=False, then=Value(0)),
+                default=Value(1),
+                output_field=IntegerField()
+            ),
+            ordering_key=Case(
+                When(is_refreshed=False,
+                     then=ExpressionWrapper(-F('created_ts'), output_field=FloatField())),
+                default=ExpressionWrapper(-F('annotated_likes'), output_field=FloatField())
+            )
+        ).order_by('sort_group', 'ordering_key', '-id')
+
+        # 子评论查询集同样使用 UnixTimestamp
+        replies_qs = Comment.objects.filter(parent__isnull=False).annotate(
+            annotated_likes=Count('likes'),
+            created_ts=UnixTimestamp(F('created_at'))  # 关键修改
+        ).annotate(
+            sort_group=Case(
+                When(is_refreshed=False, then=Value(0)),
+                default=Value(1),
+                output_field=IntegerField()
+            ),
+            ordering_key=Case(
+                When(is_refreshed=False,
+                     then=ExpressionWrapper(-F('created_ts'), output_field=FloatField())),
+                default=ExpressionWrapper(-F('annotated_likes'), output_field=FloatField())
+            )
+        ).order_by('sort_group', 'ordering_key', '-id')
+
+        qs = qs.prefetch_related(
+            Prefetch('replies', queryset=replies_qs[:5], to_attr='filtered_replies')
         )
+        return qs
 
-        if user.is_authenticated:
-            base_qs = base_qs
+    def perform_create(self, serializer):
+        note = get_object_or_404(Note, id=self.kwargs['note_id'])
+        serializer.save(note=note, user=self.request.user)
 
-        replies_qs = Comment.objects.annotate(
-            annotated_likes=Count('likes')  # 同步修改子查询
-        ).order_by('-annotated_likes')
 
-        if user.is_authenticated:
-            replies_qs = replies_qs
-
-        return base_qs.order_by('-annotated_likes').prefetch_related(
-            Prefetch('replies',
-                     queryset=replies_qs[:5],
-                     to_attr='filtered_replies'
-                     )
-        )
-
-    def list(self, request, *args, **kwargs):
-        # 保持分页响应格式
-        return super().list(request, *args, **kwargs)
-
-    # def get_queryset(self):
-    #     user = self.request.user
-    #     note_id = self.kwargs.get('note_id')
-    #     return Comment.objects.filter(note_id=note_id).exclude(
-    #         dislikes=user).order_by('created_at')
-    #
-    # def list(self, request, *args, **kwargs):
-    #     note_id = self.kwargs.get('note_id')
-    #     note = get_object_or_404(Note, id=note_id)
-    #     total_count = note.comments_count
-    #
-    #     # 获取所有根评论（第一层）
-    #     root_comments = Comment.objects.filter(
-    #         note_id=note_id,
-    #         parent__isnull=True
-    #     ).order_by('created_at')
-    #
-    #     result = []
-    #     for root in root_comments:
-    #         root_data = CommentSerializer(root, context={'request': request}).data
-    #         # 获取该根评论下所有回复（递归收集）
-    #         replies = self.get_all_replies(root)
-    #         processed_replies = []
-    #         for reply in replies:
-    #             reply_data = CommentSerializer(reply, context={'request': request}).data
-    #             # 显示逻辑保持不变
-    #             if reply.parent_id == root.id:
-    #                 reply_data['display_content'] = reply.content
-    #             else:
-    #                 reply_data[
-    #                     'display_content'] = f"{reply.user.username} 回复 {reply.parent.user.username}：{reply.content}"
-    #             processed_replies.append(reply_data)
-    #         root_data['replies'] = processed_replies
-    #         result.append(root_data)
-    #
-    #     return Response({
-    #         'comments_count': total_count,
-    #         'results': result
-    #     }, status=status.HTTP_200_OK)
-    #
-    # def get_all_replies(self, comment):
-    #     """递归获取 comment 下的所有回复"""
-    #     replies = []
-    #     # 移除了is_deleted过滤
-    #     direct_replies = comment.replies.all().order_by('created_at')
-    #     for reply in direct_replies:
-    #         replies.append(reply)
-    #         replies.extend(self.get_all_replies(reply))
-    #     return replies
-
-    # def perform_create(self, serializer):
-    #     note_id = self.kwargs.get('note_id')
-    #     note = get_object_or_404(Note, id=note_id)
-    #     serializer.save(note=note, user=self.request.user)
-
-# 获取根评论的所有子评论（已有分页处理）
 class SubCommentListView(generics.ListAPIView):
     serializer_class = CommentSerializer
     pagination_class = SubCommentPagination
@@ -390,29 +355,111 @@ class SubCommentListView(generics.ListAPIView):
 
     def get_queryset(self):
         root_id = self.kwargs['root_id']
-        user = self.request.user
-
         try:
             root_comment = Comment.objects.get(id=root_id)
         except Comment.DoesNotExist:
             return Comment.objects.none()
 
-        # 获取所有后代评论
+        # 获取所有后代评论（建议改用 CTE 优化）
         all_descendants = root_comment.get_all_descendants()
-
-        # 转换为ID列表
         comment_ids = [c.id for c in all_descendants]
 
-        # 构建优化查询
-        qs = Comment.objects.filter(
-            Q(id__in=comment_ids)
+        qs = Comment.objects.filter(id__in=comment_ids)
+        qs = qs.annotate(
+            annotated_likes=Count('likes'),
+            created_ts=UnixTimestamp(F('created_at'))  # 关键修改
         ).annotate(
-            annotated_likes=Count('likes')
-        ).select_related('user').order_by('-annotated_likes')
+            sort_group=Case(
+                When(is_refreshed=False, then=Value(0)),
+                default=Value(1),
+                output_field=IntegerField()
+            ),
+            ordering_key=Case(
+                When(is_refreshed=False,
+                     then=ExpressionWrapper(-F('created_ts'), output_field=FloatField())),
+                default=ExpressionWrapper(-F('annotated_likes'), output_field=FloatField())
+            )
+        ).select_related('user').order_by('sort_group', 'ordering_key', '-id')
+        return qs
 
-        # 过滤用户不喜欢的评论
-        if user.is_authenticated:
-            return qs
+
+# # 评论视图（已有分页处理，只显示根评论）
+# class CommentListCreateView(generics.ListCreateAPIView):
+#     serializer_class = CommentSerializer
+#     permission_classes = [IsAuthenticated]
+#     pagination_class = RootCommentPagination
+#
+#     def get_queryset(self):
+#         note_id = self.kwargs['note_id']
+#         user = self.request.user
+#
+#         # 修改注解字段名称为 annotated_likes
+#         base_qs = Comment.objects.filter(
+#             note_id=note_id,
+#             parent__isnull=True
+#         ).annotate(
+#             annotated_likes=Count('likes'),  # 关键修改点
+#             total_replies=Count('replies')
+#         )
+#
+#         if user.is_authenticated:
+#             base_qs = base_qs
+#
+#         replies_qs = Comment.objects.annotate(
+#             annotated_likes=Count('likes')  # 同步修改子查询
+#         ).order_by('-annotated_likes')
+#
+#         if user.is_authenticated:
+#             replies_qs = replies_qs
+#
+#         return base_qs.order_by('-annotated_likes').prefetch_related(
+#             Prefetch('replies',
+#                      queryset=replies_qs[:5],
+#                      to_attr='filtered_replies'
+#                      )
+#         )
+#
+#     def list(self, request, *args, **kwargs):
+#         # 保持分页响应格式
+#         return super().list(request, *args, **kwargs)
+#
+#     def perform_create(self, serializer):
+#         note_id = self.kwargs.get('note_id')
+#         note = get_object_or_404(Note, id=note_id)
+#         serializer.save(note=note, user=self.request.user)
+#
+#
+# # 获取根评论的所有子评论（已有分页处理）
+# class SubCommentListView(generics.ListAPIView):
+#     serializer_class = CommentSerializer
+#     pagination_class = SubCommentPagination
+#     permission_classes = [IsAuthenticated]
+#
+#     def get_queryset(self):
+#         root_id = self.kwargs['root_id']
+#         user = self.request.user
+#
+#         try:
+#             root_comment = Comment.objects.get(id=root_id)
+#         except Comment.DoesNotExist:
+#             return Comment.objects.none()
+#
+#         # 获取所有后代评论
+#         all_descendants = root_comment.get_all_descendants()
+#
+#         # 转换为ID列表
+#         comment_ids = [c.id for c in all_descendants]
+#
+#         # 构建优化查询
+#         qs = Comment.objects.filter(
+#             Q(id__in=comment_ids)
+#         ).annotate(
+#             annotated_likes=Count('likes')
+#         ).select_related('user').order_by('-annotated_likes')
+#
+#         # 过滤用户不喜欢的评论
+#         if user.is_authenticated:
+#             return qs
 
     # def get_queryset(self):
     #     User = get_user_model()
@@ -450,25 +497,6 @@ class SubCommentListView(generics.ListAPIView):
     #         return qs
 
 
-# 评论点赞
-class CommentLikeView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        comment = get_object_or_404(Comment, pk=pk)
-        user = request.user
-        if user in comment.likes.all():
-            comment.likes.remove(user)
-            liked = False
-        else:
-            comment.likes.add(user)
-            liked = True
-        return Response({
-            'like_count': comment.likes.count(),
-            'is_liked': liked
-        }, status=status.HTTP_200_OK)
-
-
 # 删除评论（改为物理删除）
 class CommentDestroyView(generics.DestroyAPIView):
     queryset = Comment.objects.all()
@@ -478,6 +506,34 @@ class CommentDestroyView(generics.DestroyAPIView):
     def perform_destroy(self, instance):
         # 可以直接调用delete()方法，Django会自动级联删除所有子评论
         instance.delete()
+
+
+# 评论点赞
+class CommentLikeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        comment = get_object_or_404(Comment, pk=pk)
+        user = request.user
+
+        # 互斥逻辑：如果用户之前点过不喜欢，先取消不喜欢
+        if comment.dislikes.filter(id=user.id).exists():
+            comment.dislikes.remove(user)
+
+        # 处理点赞/取消点赞
+        if comment.likes.filter(id=user.id).exists():
+            comment.likes.remove(user)
+            liked = False
+        else:
+            comment.likes.add(user)
+            liked = True
+
+        return Response({
+            'like_count': comment.likes.count(),
+            'is_liked': liked,
+            'dislike_count': comment.dislikes.count(),
+            'is_disliked': False
+        }, status=status.HTTP_200_OK)
 
 
 # 不喜欢的评论

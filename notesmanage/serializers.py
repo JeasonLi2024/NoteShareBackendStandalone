@@ -1,6 +1,7 @@
 # serializers.py
+from django.core.cache import cache
 from rest_framework import serializers
-from .models import Note, Comment, Like, Notification
+from .models import Note, Comment, Like
 from django.contrib.auth import get_user_model
 import pytz
 
@@ -11,6 +12,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['id', 'username', 'avatar']
+        ref_name = 'NotesManageUserSerializer'
 
     def get_avatar(self, obj):
         request = self.context.get('request')
@@ -20,6 +22,66 @@ class UserSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(obj.avatar.url)
         return None
 
+
+# class CommentSerializer(serializers.ModelSerializer):
+#     note = serializers.PrimaryKeyRelatedField(read_only=True)  # 不让前端传递
+#     user = UserSerializer(read_only=True)
+#     like_count = serializers.IntegerField(source='annotated_likes', read_only=True)
+#     dislike_count = serializers.IntegerField(read_only=True)
+#     is_liked = serializers.SerializerMethodField()
+#     is_disliked = serializers.SerializerMethodField()
+#     display_content = serializers.SerializerMethodField()
+#     top_replies = serializers.SerializerMethodField()
+#     total_replies = serializers.SerializerMethodField()
+#
+#     class Meta:
+#         model = Comment
+#         fields = [
+#             'id', 'note', 'user', 'parent', 'content', 'dislike_count','created_at',
+#             'updated_at', 'like_count', 'is_liked', 'is_disliked', 'display_content', 'top_replies', 'total_replies'
+#         ]
+#         read_only_fields = ['id', 'user', 'created_at', 'updated_at', 'like_count', 'is_liked', 'is_disliked']
+#
+#     def get_top_replies(self, obj):
+#         replies = getattr(obj, 'filtered_replies', [])[:5]
+#         return CommentSerializer(
+#             replies,
+#             many=True,
+#             context=self.context
+#         ).data
+#
+#     def get_total_replies(self, obj):
+#         # 获取该根评论的总回复数
+#         return obj.replies.count()
+#
+#     def get_is_liked(self, obj):
+#         # 使用预加载的likes数据避免额外查询
+#         return self.context['request'].user.id in [
+#             u.id for u in getattr(obj, 'prefetched_likes', [])
+#         ]
+#
+#     def get_is_disliked(self, obj):
+#         request = self.context.get('request')
+#         if not request or not request.user.is_authenticated:
+#             return False
+#         return obj.dislikes.filter(id=request.user.id).exists()
+#
+#     def get_display_content(self, obj):
+#         """根据不喜欢状态返回不同内容"""
+#         if self.get_is_disliked(obj):
+#             return "该评论被折叠"
+#         # return obj.get_display_content()  # 保持原有显示逻辑
+#         return obj.display_content  # 直接使用缓存属性
+#
+#     def validate(self, data):
+#         # 不再限制回复层级，允许对任何评论进行回复
+#         return data
+#
+#     def create(self, validated_data):
+#         # 自动设置评论作者
+#         request = self.context.get('request')
+#         validated_data['user'] = request.user
+#         return super().create(validated_data)
 
 class CommentSerializer(serializers.ModelSerializer):
     note = serializers.PrimaryKeyRelatedField(read_only=True)  # 不让前端传递
@@ -35,7 +97,7 @@ class CommentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Comment
         fields = [
-            'id', 'note', 'user', 'parent', 'content', 'dislike_count','created_at',
+            'id', 'note', 'user', 'parent', 'content', 'dislike_count', 'created_at',
             'updated_at', 'like_count', 'is_liked', 'is_disliked', 'display_content', 'top_replies', 'total_replies'
         ]
         read_only_fields = ['id', 'user', 'created_at', 'updated_at', 'like_count', 'is_liked', 'is_disliked']
@@ -53,10 +115,10 @@ class CommentSerializer(serializers.ModelSerializer):
         return obj.replies.count()
 
     def get_is_liked(self, obj):
-        request = self.context.get('request')
-        if not request or not request.user.is_authenticated:
-            return False
-        return obj.likes.filter(id=request.user.id).exists()
+        # 使用预加载的likes数据避免额外查询
+        return self.context['request'].user.id in [
+            u.id for u in getattr(obj, 'prefetched_likes', [])
+        ]
 
     def get_is_disliked(self, obj):
         request = self.context.get('request')
@@ -68,7 +130,8 @@ class CommentSerializer(serializers.ModelSerializer):
         """根据不喜欢状态返回不同内容"""
         if self.get_is_disliked(obj):
             return "该评论被折叠"
-        return obj.get_display_content()  # 保持原有显示逻辑
+        # 直接使用缓存属性或模型中的逻辑返回显示内容
+        return obj.get_display_content()
 
     def validate(self, data):
         # 不再限制回复层级，允许对任何评论进行回复

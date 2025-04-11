@@ -42,6 +42,7 @@ DB_USER= os.getenv('USER')
 
 # Application definition
 INSTALLED_APPS = [
+    'daphne',
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -49,10 +50,12 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     'django_ckeditor_5',
+    'channels',
     'corsheaders',
     'rest_framework',
     'rest_framework_simplejwt',  # 添加 simplejwt 应用
     'rest_framework_simplejwt.token_blacklist',
+    'notifications.apps.NotificationsConfig',
     'django_filters',
     'drf_yasg',
     'user',
@@ -94,7 +97,15 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "NoteShareBackend.wsgi.application"
-
+ASGI_APPLICATION = 'NoteShareBackend.asgi.application'
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
+        },
+    },
+}
 # REST_FRAMEWORK增加全局过滤配置
 REST_FRAMEWORK = {
     'DEFAULT_FILTER_BACKENDS': [
@@ -394,6 +405,10 @@ CELERY_TIMEZONE = 'Asia/Shanghai'
 CELERY_BEAT_SCHEDULE = {
     'update-top-notes-every-30s': {
         'task': 'notesmanage.tasks.periodic_update_top_notes',
-        'schedule': 30 ,  # 每1分钟执行一次
+        'schedule': 30,  # 每30秒执行一次
+    },
+    'refresh-comments-every-5-min': {
+        'task': 'notesmanage.tasks.refresh_comments_order',
+        'schedule': 30,  # 每5分钟执行一次
     },
 }

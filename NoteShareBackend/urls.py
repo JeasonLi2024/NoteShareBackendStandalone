@@ -45,6 +45,7 @@ urlpatterns = [
     path("ckeditor5/", include('django_ckeditor_5.urls')),
     path('user/', include('user.urls')),
     path('notesmanage/', include('notesmanage.urls')),
+    path('notifications/', include('notifications.urls')),
 
     # 更新功能已经包含头像更新
     path('user/update/', UserUpdateView.as_view(), name='user-update'),

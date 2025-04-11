@@ -3,7 +3,8 @@ from django.contrib.auth import get_user_model
 from django_ckeditor_5.fields import CKEditor5Field#富文本编辑器
 from django.db.models import OuterRef, Subquery
 from django.core.cache import cache
-from django.db.models import Case, When, F, IntegerField, CharField, Value
+from django.db.models import Count, Q
+from django.utils import timezone
 
 from model_utils import FieldTracker
 
@@ -96,6 +97,70 @@ class TopNote(models.Model):
         return f"Top Note: {self.note.title} - Popularity: {self.popularity}"
 
 
+# class Comment(models.Model):
+#     note = models.ForeignKey(Note, on_delete=models.CASCADE, related_name='comments', verbose_name='笔记')
+#     user = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='用户')
+#     parent = models.ForeignKey(
+#         'self', null=True, blank=True, on_delete=models.CASCADE,  # 保持级联删除
+#         related_name='replies'
+#     )
+#     content = models.TextField(verbose_name='评论内容')
+#     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+#     updated_at = models.DateTimeField(auto_now=True)
+#     likes = models.ManyToManyField(User, related_name='liked_comments', blank=True)
+#     dislikes = models.ManyToManyField(User, related_name='disliked_comments', blank=True)
+#
+#     def __str__(self):
+#         return f"Comment({self.user}, {self.content[:20]})"
+#     # 缓存查询结果
+#     def get_all_descendants(self):
+#         """递归获取所有后代评论（平铺列表）"""
+#         cache_key = f'comment_{self.id}_descendants'
+#         cached = cache.get(cache_key)
+#         if cached:
+#             return cached
+#         descendants = []
+#         current_level = self.replies.all()
+#         while current_level.exists():
+#             descendants.extend(current_level)
+#             current_level = Comment.objects.filter(parent__in=current_level)
+#         cache.set(cache_key, descendants, 60 * 15)  # 缓存15分钟
+#         return descendants
+#
+#     def get_all_replies(self):
+#         """递归获取所有回复（现在直接通过级联删除自动处理）"""
+#         all_replies = []
+#         for reply in self.replies.all().order_by('created_at'):
+#             all_replies.append(reply)
+#             all_replies.extend(reply.get_all_replies())
+#         return all_replies
+#
+#     def get_display_content(self):
+#         """决定评论显示内容的逻辑"""
+#         if not self.parent:
+#             return self.content
+#         elif self.parent and not self.parent.parent:
+#             return self.content
+#         else:
+#             return f"{self.user.username} 回复 {self.parent.user.username}：{self.content}"
+#
+#     @property
+#     def like_count(self):
+#         return self.likes.count()
+#
+#     @property
+#     def dislike_count(self):
+#         return self.dislikes.count()
+#
+#     class Meta:
+#         verbose_name_plural = '笔记评论管理'
+#         ordering = ['created_at']
+#         indexes = [
+#             models.Index(fields=['parent']),  # 加速层级查询
+#             models.Index(fields=['-created_at']),
+#         ]
+
+
 class Comment(models.Model):
     note = models.ForeignKey(Note, on_delete=models.CASCADE, related_name='comments', verbose_name='笔记')
     user = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='用户')
@@ -108,22 +173,18 @@ class Comment(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     likes = models.ManyToManyField(User, related_name='liked_comments', blank=True)
     dislikes = models.ManyToManyField(User, related_name='disliked_comments', blank=True)
+    is_refreshed = models.BooleanField(default=False, verbose_name="已参与点赞排序")
 
     def __str__(self):
         return f"Comment({self.user}, {self.content[:20]})"
-    # 缓存查询结果
+
     def get_all_descendants(self):
-        """递归获取所有后代评论（平铺列表）"""
-        cache_key = f'comment_{self.id}_descendants'
-        cached = cache.get(cache_key)
-        if cached:
-            return cached
+        """递归获取所有后代评论（平铺列表），不使用缓存保证新数据能立刻显示"""
         descendants = []
         current_level = self.replies.all()
         while current_level.exists():
             descendants.extend(current_level)
             current_level = Comment.objects.filter(parent__in=current_level)
-        cache.set(cache_key, descendants, 60 * 15)  # 缓存15分钟
         return descendants
 
     def get_all_replies(self):
@@ -153,53 +214,8 @@ class Comment(models.Model):
 
     class Meta:
         verbose_name_plural = '笔记评论管理'
-        ordering = ['created_at']
+        # 注意：为了视图中实现动态排序，这里可不设置默认 ordering
         indexes = [
             models.Index(fields=['parent']),  # 加速层级查询
             models.Index(fields=['-created_at']),
         ]
-
-
-# 通知模型
-class Notification(models.Model):
-    NOTIFICATION_TYPES = (
-        ('reply', '回复通知'),
-        ('like', '点赞通知'),
-        ('mention', '@提及通知'),
-    )
-
-    recipient = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name='received_notifications'
-    )
-    sender = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name='sent_notifications',
-        null=True
-    )
-    comment = models.ForeignKey(
-        Comment,
-        on_delete=models.CASCADE,
-        null=True
-    )
-    notification_type = models.CharField(
-        max_length=20,
-        choices=NOTIFICATION_TYPES
-    )
-    is_read = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-    content = models.TextField()  # 冗余字段用于快速展示
-
-    class Meta:
-        indexes = [
-            models.Index(fields=['recipient', 'is_read']),
-            models.Index(fields=['created_at']),
-        ]
-        ordering = ['-created_at']
-
-    def __str__(self):
-        return f"{self.get_notification_type_display()} - {self.recipient}"
-
-

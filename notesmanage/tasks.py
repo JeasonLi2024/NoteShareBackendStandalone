@@ -51,6 +51,9 @@
 
 from celery import shared_task
 from .models import Note, TopNote
+from datetime import timedelta
+from django.utils import timezone
+from .models import Comment
 
 
 @shared_task
@@ -70,6 +73,15 @@ def periodic_update_top_notes():
 
     print("All public notes updated and saved in TopNote.")
 
+@shared_task
+def refresh_comments_order():
+    """
+    每 20 分钟执行一次任务，将创建时间超过 20 分钟且未刷新过的评论
+    标记为已刷新，此时这些评论将在排序时采用点赞数排序。
+    """
+    threshold = timezone.now() - timedelta(minutes=20)
+    updated = Comment.objects.filter(is_refreshed=False, created_at__lte=threshold).update(is_refreshed=True)
+    return updated
 
 
 

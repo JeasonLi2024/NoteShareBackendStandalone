@@ -14,6 +14,7 @@ class UserSerializer(serializers.ModelSerializer):
         )
         extra_kwargs = {'password': {'write_only': True}}
         read_only_fields = ('created_at', 'last_login')
+        ref_name = 'UserAppUserSerializer'
 
 class UserCreateSerializer(serializers.ModelSerializer):
     avatar = serializers.ImageField(required=False, allow_null=True)
