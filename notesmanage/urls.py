@@ -9,6 +9,7 @@ from notesmanage.views import (
     TopNotesView, preview_note, NoteListView, NotesByCategoryView,
     UserLikedNotesView, CommentListCreateView, CommentDislikeView, SubCommentListView
 )
+from .ai_conclude import spark_lite
 
 urlpatterns = [
                   # 通过表单实现的笔记上传页面
@@ -44,5 +45,7 @@ urlpatterns = [
                   path('notes/category/<str:category>/page/<int:page_number>/', NotesByCategoryView.as_view(), name='notes_by_category'),
                   # 笔记预览
                   path('notes/<int:note_id>/preview/', preview_note, name='note-preview'),
+                  # AI笔记总结
+                  path('notes/ai_conclude/', spark_lite, name='note-ai_conclude'),
 
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
