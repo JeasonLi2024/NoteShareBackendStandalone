@@ -4,8 +4,10 @@ from user.models import User
 NOTIFICATION_TYPE_CHOICES = (
     ('note_like', '笔记点赞'),
     ('note_comment', '笔记评论'),
+    ('note_favorite', '笔记收藏'),
     ('comment_reply', '评论回复'),
     ('comment_like', '评论点赞'),
+    ('follow', '关注')
 )
 
 

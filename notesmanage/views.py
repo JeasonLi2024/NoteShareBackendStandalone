@@ -6,17 +6,17 @@ from rest_framework.decorators import action
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import Note, Comment, Like, TopNote
+from .models import Note, Comment, Like, TopNote, Favorite
 from .pagination import SubCommentPagination, RootCommentPagination
 from django.core.paginator import Paginator
 from rest_framework.pagination import PageNumberPagination
-from .serializers import NoteSerializer, CommentSerializer, NoteSimpleSerializer, NoteLikeSerializer
+from .serializers import NoteSerializer, CommentSerializer, NoteSimpleSerializer, NoteLikeSerializer, NoteFavoriteSerializer, UserSerializer
 from django.db.models import (
     F, Func, Count, Case, When, Value,
     IntegerField, FloatField, ExpressionWrapper,
     Prefetch
 )
-from .utils import UnixTimestamp
+from .utils import UnixTimestamp, get_share_link
 from django.http import HttpResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.db.models.functions import Now, Extract
@@ -31,6 +31,7 @@ import fitz  # PyMuPDF
 import docx
 import markdown
 
+User = get_user_model()
 
 # 笔记列表（测试用），已验证
 class NoteListView(APIView):
@@ -219,12 +220,17 @@ class NoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
         if request.user != instance.author:
             instance.views_count += 1
             instance.save()
+            # 同时更新作者的总浏览量
+            instance.author.total_views += 1
+            instance.author.save()
         serializer = self.get_serializer(instance, context={'request': request})
-        # serializer = self.get_serializer(instance)
+        share_link = get_share_link(request, instance.id)  # 生成分享链接
+
         return Response({
             "code": status.HTTP_200_OK,
             "message": "Note retrieved successfully",
-            "data": serializer.data
+            "data": serializer.data,
+            "share_link": share_link
         }, status=status.HTTP_200_OK)
 
     #update方法处理 PUT 和 PATCH 请求，更新笔记内容，并返回成功消息和更新后的数据
@@ -295,6 +301,49 @@ class UserLikedNotesView(generics.ListAPIView):
         return {'request': self.request}
 
 
+# 收藏试图
+class NoteFavoriteView(generics.GenericAPIView):
+    queryset = Note.objects.all()
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        note = self.get_object()
+        user = request.user
+
+        # 检查是否已收藏
+        if not Favorite.objects.filter(note=note, user=user).exists():
+            Favorite.objects.create(note=note, user=user)
+            return Response({'detail': 'Favorited'}, status=status.HTTP_201_CREATED)
+        return Response({'detail': 'Already favorited'}, status=status.HTTP_200_OK)
+
+    def delete(self, request, *args, **kwargs):
+        note = self.get_object()
+        user = request.user
+
+        # 精确删除当前用户的收藏记录
+        deleted, _ = Favorite.objects.filter(note=note, user=user).delete()
+        if deleted > 0:
+            return Response({'detail': 'Unfavorited'}, status=status.HTTP_204_NO_CONTENT)
+        return Response({'detail': 'Not favorited'}, status=status.HTTP_200_OK)
+
+
+# 收藏笔记列表
+class UserFavoriteNotesView(generics.ListAPIView):
+    serializer_class = NoteFavoriteSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # 通过 Favorite 模型反向关联获取当前用户收藏的 Note 实例
+        return Note.objects.filter(favorited_by__user=self.request.user)\
+            .select_related('author')\
+            .prefetch_related('favorited_by')
+
+    def get_serializer_context(self):
+        # 传递 request 对象以构建完整 URL（如果序列化器中需要使用）
+        return {'request': self.request}
+
+
+# 获取根评论
 class CommentListCreateView(generics.ListCreateAPIView):
     serializer_class = CommentSerializer
     permission_classes = [IsAuthenticated]
@@ -348,6 +397,7 @@ class CommentListCreateView(generics.ListCreateAPIView):
         serializer.save(note=note, user=self.request.user)
 
 
+# 获取根评论下的所有子评论
 class SubCommentListView(generics.ListAPIView):
     serializer_class = CommentSerializer
     pagination_class = SubCommentPagination
@@ -381,120 +431,6 @@ class SubCommentListView(generics.ListAPIView):
             )
         ).select_related('user').order_by('sort_group', 'ordering_key', '-id')
         return qs
-
-
-# # 评论视图（已有分页处理，只显示根评论）
-# class CommentListCreateView(generics.ListCreateAPIView):
-#     serializer_class = CommentSerializer
-#     permission_classes = [IsAuthenticated]
-#     pagination_class = RootCommentPagination
-#
-#     def get_queryset(self):
-#         note_id = self.kwargs['note_id']
-#         user = self.request.user
-#
-#         # 修改注解字段名称为 annotated_likes
-#         base_qs = Comment.objects.filter(
-#             note_id=note_id,
-#             parent__isnull=True
-#         ).annotate(
-#             annotated_likes=Count('likes'),  # 关键修改点
-#             total_replies=Count('replies')
-#         )
-#
-#         if user.is_authenticated:
-#             base_qs = base_qs
-#
-#         replies_qs = Comment.objects.annotate(
-#             annotated_likes=Count('likes')  # 同步修改子查询
-#         ).order_by('-annotated_likes')
-#
-#         if user.is_authenticated:
-#             replies_qs = replies_qs
-#
-#         return base_qs.order_by('-annotated_likes').prefetch_related(
-#             Prefetch('replies',
-#                      queryset=replies_qs[:5],
-#                      to_attr='filtered_replies'
-#                      )
-#         )
-#
-#     def list(self, request, *args, **kwargs):
-#         # 保持分页响应格式
-#         return super().list(request, *args, **kwargs)
-#
-#     def perform_create(self, serializer):
-#         note_id = self.kwargs.get('note_id')
-#         note = get_object_or_404(Note, id=note_id)
-#         serializer.save(note=note, user=self.request.user)
-#
-#
-# # 获取根评论的所有子评论（已有分页处理）
-# class SubCommentListView(generics.ListAPIView):
-#     serializer_class = CommentSerializer
-#     pagination_class = SubCommentPagination
-#     permission_classes = [IsAuthenticated]
-#
-#     def get_queryset(self):
-#         root_id = self.kwargs['root_id']
-#         user = self.request.user
-#
-#         try:
-#             root_comment = Comment.objects.get(id=root_id)
-#         except Comment.DoesNotExist:
-#             return Comment.objects.none()
-#
-#         # 获取所有后代评论
-#         all_descendants = root_comment.get_all_descendants()
-#
-#         # 转换为ID列表
-#         comment_ids = [c.id for c in all_descendants]
-#
-#         # 构建优化查询
-#         qs = Comment.objects.filter(
-#             Q(id__in=comment_ids)
-#         ).annotate(
-#             annotated_likes=Count('likes')
-#         ).select_related('user').order_by('-annotated_likes')
-#
-#         # 过滤用户不喜欢的评论
-#         if user.is_authenticated:
-#             return qs
-
-    # def get_queryset(self):
-    #     User = get_user_model()
-    #     root_id = self.kwargs['root_id']
-    #     user = self.request.user
-    #
-    #     # 递归获取所有后代评论ID
-    #     with connection.cursor() as cursor:
-    #         cursor.execute("""
-    #             WITH RECURSIVE comment_tree AS (
-    #                 SELECT id, parent_id
-    #                 FROM notesmanage_comment
-    #                 WHERE parent_id = %s
-    #                 UNION ALL
-    #                 SELECT c.id, c.parent_id
-    #                 FROM notesmanage_comment c
-    #                 INNER JOIN comment_tree ct ON c.parent_id = ct.id
-    #             )
-    #             SELECT id FROM comment_tree
-    #         """,[root_id])
-    #         comment_ids = [row[0] for row in cursor.fetchall()]
-    #
-    #     if not comment_ids:
-    #         return Comment.objects.none()
-    #
-    #     # 构建基础查询集
-    #     qs = Comment.objects.filter(
-    #         id__in=comment_ids
-    #     ).annotate(
-    #         annotated_likes=Count('likes')
-    #     ).select_related('user').order_by('-annotated_likes')
-    #
-    #     # 排除用户不喜欢的评论
-    #     if user.is_authenticated:
-    #         return qs
 
 
 # 删除评论（改为物理删除）
@@ -593,3 +529,37 @@ class NoteSearchView(generics.ListAPIView):
         top_notes = TopNote.objects.filter(note__in=queryset).order_by('rank')
         # 返回当前页的笔记对象列表
         return [top_note.note for top_note in top_notes]
+
+
+# 关注功能,URL中传入要关注的用户ID（pk）
+class FollowToggleView(generics.GenericAPIView):
+
+    queryset = User.objects.all()
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        target_user = self.get_object()  # 获取目标用户
+        current_user = request.user
+
+        # 防止用户关注自己
+        if target_user == current_user:
+            return Response({'detail': '不能关注自己'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 如果已经关注，则取消关注；否则关注
+        if target_user in current_user.following.all():
+            current_user.following.remove(target_user)
+            return Response({'detail': '已取消关注'}, status=status.HTTP_204_NO_CONTENT)
+        else:
+            current_user.following.add(target_user)
+            return Response({'detail': '关注成功'}, status=status.HTTP_201_CREATED)
+
+
+class FollowedUsersListView(generics.ListAPIView):
+    """
+    列出当前登录用户关注的所有用户（已关注列表）
+    """
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return self.request.user.following.all()

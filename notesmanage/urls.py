@@ -1,13 +1,12 @@
 from django.conf import settings
 from django.conf.urls.static import static
-from django.urls import path, include
-from rest_framework.routers import DefaultRouter
-from . import views
+from django.urls import path
 from notesmanage.views import (
     UserNotesView, NoteCreateView, NoteRetrieveUpdateDestroyView,
     NoteLikeView,  NoteSearchView, CommentDestroyView, CommentLikeView,
     TopNotesView, preview_note, NoteListView, NotesByCategoryView,
-    UserLikedNotesView, CommentListCreateView, CommentDislikeView, SubCommentListView
+    UserLikedNotesView, CommentListCreateView, CommentDislikeView, SubCommentListView,
+    UserFavoriteNotesView, NoteFavoriteView, FollowToggleView, FollowedUsersListView
 )
 from .ai_conclude import spark_lite
 
@@ -22,10 +21,18 @@ urlpatterns = [
                   path('notes/create', NoteCreateView.as_view(), name='note-list-create'),
                   # 多功能，集笔记访问（客人用户访问时read_only，同时浏览数增加；笔记所有者访问时可以对笔记进行修改和删除）
                   path('notes/<int:pk>/', NoteRetrieveUpdateDestroyView.as_view(), name='note-retrieve-update-destroy'),
+                  # 关注功能
+                  path('follow/<int:pk>/', FollowToggleView.as_view(), name='follow-toggle'),
+                  # 关注列表
+                  path('following/', FollowedUsersListView.as_view(), name='followed-users'),
                   # 点赞功能
                   path('notes/<int:pk>/like/', NoteLikeView.as_view(), name='note-like'),
                   # 用户点过赞的笔记
                   path('user/me/liked-notes/', UserLikedNotesView.as_view(), name='user-liked-notes'),
+                  # 收藏功能
+                  path('notes/<int:pk>/favorite/', NoteFavoriteView.as_view(), name='note-favorite'),
+                  # 用户收藏的笔记
+                  path('user/me/favorited-notes/', UserFavoriteNotesView.as_view(), name='user-favorited-notes'),
                   # 笔记评论接口
                   path('notes/<int:note_id>/comments/', CommentListCreateView.as_view(), name='note-comments'),
                   # 评论点赞接口

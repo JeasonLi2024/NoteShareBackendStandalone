@@ -37,6 +37,7 @@ class Note(models.Model):
     views_count = models.PositiveIntegerField(default=0, verbose_name='浏览次数')
     likes_count = models.PositiveIntegerField(default=0, verbose_name='点赞数')
     comments_count = models.PositiveIntegerField(default=0, verbose_name='评论数')
+    favorites_count = models.PositiveIntegerField(default=0, verbose_name='收藏数')
     is_pinned = models.BooleanField(default=False, verbose_name='是否置顶')
     cover_image = models.ImageField(upload_to='covers/', verbose_name='封面图片')
     note_video = models.FileField(upload_to='note_videos/', blank=True, null=True, verbose_name='视频')
@@ -82,6 +83,19 @@ class Like(models.Model):
     class Meta:
         unique_together = ('user', 'note')
         ordering = ['-created_at']
+
+
+
+# 笔记收藏
+class Favorite(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='favorites')
+    note = models.ForeignKey(Note, on_delete=models.CASCADE, related_name='favorited_by')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='收藏时间')
+
+    class Meta:
+        unique_together = ('user', 'note')
+        ordering = ['-created_at']
+
 
 
 # 笔记热度排序模型
