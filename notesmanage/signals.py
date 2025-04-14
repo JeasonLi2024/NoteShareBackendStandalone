@@ -5,8 +5,7 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from .models import Note, Like, Comment, Favorite
 from django.contrib.auth import get_user_model
-
-# 导入通知模型（注意确保 notifications 应用在 INSTALLED_APPS 中）
+# 导入通知模型
 from notifications.models import Notification
 
 User = get_user_model()
@@ -63,6 +62,7 @@ def push_notification(user, notification):
                  'message': notification.message,
                  'is_read': notification.is_read,
                  'created_at': notification.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                 'note_id': notification.extra_data.get('note_id', None),
              }
          }
     )
@@ -149,11 +149,6 @@ def send_comment_like_notification(sender, instance, action, pk_set, **kwargs):
 # 5. 用户关注
 @receiver(m2m_changed, sender=User.following.through)
 def send_follow_notification(sender, instance, action, pk_set, **kwargs):
-    """
-    当 instance 的 following 字段发生变化时发送关注通知
-    - instance：表示执行操作的用户（即发起关注的人）
-    - pk_set：为被关注用户的ID集合
-    """
     if action == 'post_add':
         for target_user_id in pk_set:
             try:
@@ -163,7 +158,6 @@ def send_follow_notification(sender, instance, action, pk_set, **kwargs):
             # 避免用户关注自己
             if target_user == instance:
                 continue
-            # 创建关注通知（此处通知类型可以定义为 'follow'）
             notification = Notification.objects.create(
                 recipient=target_user,
                 sender=instance,
@@ -172,3 +166,28 @@ def send_follow_notification(sender, instance, action, pk_set, **kwargs):
             )
             # 推送通知到 target_user 的 websocket 连接
             push_notification(target_user, notification)
+
+
+# 6. 关注的作者的新笔记通知
+@receiver(post_save, sender=Note)
+def send_new_note_notification(sender, instance, created, **kwargs):
+    if created:
+        # 获取笔记的作者和该作者的粉丝(即 User.followers)
+        author = instance.author
+        # 假设在自定义 User 模型中，关注是通过 ManyToManyField（related_name='followers') 实现
+        followers = author.followers.all()
+        for follower in followers:
+            # 避免作者关注自己导致重复通知
+            if follower.id == author.id:
+                continue
+            # 创建通知记录
+            notification = Notification.objects.create(
+                recipient=follower,
+                sender=author,
+                notification_type='new_note',
+                message=f"你关注的 {author.username} 发布了新的笔记，快去看看吧",
+            )
+            notification.extra_data = {'note_id': instance.id}
+            notification.save(update_fields=['extra_data'])
+
+            push_notification(follower, notification)

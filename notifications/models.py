@@ -7,7 +7,8 @@ NOTIFICATION_TYPE_CHOICES = (
     ('note_favorite', '笔记收藏'),
     ('comment_reply', '评论回复'),
     ('comment_like', '评论点赞'),
-    ('follow', '关注')
+    ('follow', '关注'),
+    ('new_note', '关注作者的新笔记'),
 )
 
 
@@ -24,6 +25,7 @@ class Notification(models.Model):
     message = models.TextField(blank=True)
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    extra_data = models.JSONField(blank=True, null=True)
 
     class Meta:
         ordering = ['-created_at']

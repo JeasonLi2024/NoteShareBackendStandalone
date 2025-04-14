@@ -62,7 +62,7 @@ git commit -m "commit message"
 git push origin master
 ```
 
-#### 启动 Redis （cmd管理员运行）
+## 启动 Redis （cmd管理员运行）
 ```cmd
 cd /d d:\redis # 进入Redis目录下（根据下载地址更改）
 Redis-server.exe redis.windows.conf #启动redis服务
@@ -70,7 +70,7 @@ redis-cli.exe #另开一个cmd输入指令打开Redis客户端
 ping #在命令中输入ping命令来检测redis服务器与redis客户端的连通性，返回PONG则说明连接成功了。
 ```
 
-#### celery 启动和异步任务的运行
+## celery 启动和异步任务的运行
 ```shell
 celery -A NoteShareBackend worker -l info -P eventlet
 celery -A NoteShareBackend beat --loglevel=info
@@ -139,3 +139,18 @@ celery -A NoteShareBackend beat --loglevel=info
 2. 修改部分继承父类的视图在return Response时直接使用的是父类的报错信息而非自定义反馈（try except办法捕获父类报错信息并转为自定义返回内容)
 - 使用override暂时翻译报错信息为中文
 3. 修改部分使用自定义APIView的视图不能自动连接上下文，手动设置request，可将上传的文件转为绝对路径
+
+2025-04-14
+1. 丰富Django自带的admin管理页面的显示与操作
+2. 针对笔记，添加笔记点赞、笔记评论及回复、笔记评论点赞、笔记评论踩、笔记收藏的功能
+- 评论的显示，总体上以点赞数多少排序显示，若在某时刻有新的评论则将该新评论暂时置顶，待下一个更新时间到来参与整体的更新（Celery 异步任务队列）
+- 评论的踩功能，会折叠当前该条评论
+- 评论的分层分页处理，根评论为一层，根评论的所有子评论以及子评论的子评论都归为第二层；分页展示，点击更多或展开可以看到更多评论
+3. 增加用户关注的功能，在用户模型中添加新的字段：关注、粉丝、总点赞以及总浏览量。通过关注功能，实现关注的作者发布新笔记时给其所有的粉丝发布通知消息
+- 此时返回的通知信息带有新笔记的id，便于前端跳转至该笔记详情页面
+- 关注和粉丝反向自关联
+4. 利用WebSocket添加通知功能，在点赞、评论、回复、点赞、关注时通知相应的用户
+- 使用异步网关接口ASGI协议（Asynchronous Server Gateway Interface）启动服务
+5. 增加笔记搜索功能，根据作者/标题/正文内容/概要/类别信息模糊搜索查找相关笔记
+- 搜索结果的笔记展示也是按照热度排序
+6. 增加AI的调用接口，可以用于笔记总结
