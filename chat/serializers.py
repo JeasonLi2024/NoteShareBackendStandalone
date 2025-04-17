@@ -15,9 +15,19 @@ class ConversationSerializer(serializers.ModelSerializer):
     last_message = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
 
+    author_blocked = serializers.BooleanField(read_only=True)
+    author_dnd = serializers.BooleanField(read_only=True)
+    visitor_dnd = serializers.BooleanField(read_only=True)
+    # 返回当前用户在此会话中的 DND 状态
+    current_user_dnd = serializers.SerializerMethodField()
+
     class Meta:
         model = Conversation
-        fields = ['id', 'author_id', 'visitor_id','participants', 'created_at', 'last_message', 'unread_count']
+        fields = [
+            'id', 'author_id', 'visitor_id', 'participants', 'created_at',
+            'last_message', 'unread_count',
+            'author_blocked', 'author_dnd', 'visitor_dnd', 'current_user_dnd',
+        ]
 
     def get_last_message(self, obj):
         last_msg = obj.messages.order_by('-timestamp').first()
@@ -31,3 +41,12 @@ class ConversationSerializer(serializers.ModelSerializer):
             from chat.utils import get_conversation_unread_count
             return get_conversation_unread_count(obj, request.user)
         return 0
+
+    def get_current_user_dnd(self, obj):
+        """前端只需关注自己开/关免打扰"""
+        user = self.context.get('request').user
+        if user == obj.author:
+            return obj.author_dnd
+        elif user == obj.visitor:
+            return obj.visitor_dnd
+        return False

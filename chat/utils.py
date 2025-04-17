@@ -20,10 +20,9 @@ def get_overall_unread_count(user):
         participants = list(conv.participants.all())
         if len(participants) != 2:
             continue  # 非单聊情况下，可以根据需要处理
-        author, visitor = participants[0], participants[1]
-        if user == author and conv.author_dnd:
+        if user == conv.author and conv.author_dnd:
             continue
-        if user == visitor and conv.visitor_dnd:
+        if user == conv.visitor and conv.visitor_dnd:
             continue
         overall += conv.messages.filter(is_read=False).exclude(sender=user).count()
     return overall

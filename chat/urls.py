@@ -2,7 +2,7 @@ from django.urls import path
 from .views import (
     ConversationMessagesView, UserConversationsView, MessageDeleteView,
     MessageBulkDeleteView, ConversationMessagesDeleteView, StartConversationView,
-    UploadAttachmentView
+    UploadAttachmentView, ToggleBlockView, ToggleDNDView
 )
 
 urlpatterns = [
@@ -20,4 +20,9 @@ urlpatterns = [
     path('conversations/<int:conversation_id>/messages/', ConversationMessagesDeleteView.as_view(), name='conversation-messages-delete'),
     # 附件上传发送
     path('upload_attachment/', UploadAttachmentView.as_view(), name='upload-attachment'),
+    # 拉黑操作
+    path('conversations/<int:pk>/toggle_block/', ToggleBlockView.as_view(), name='conversation-toggle-block'),
+    # 免打扰操作
+    path('conversations/<int:pk>/toggle_dnd/', ToggleDNDView.as_view(), name='conversation-toggle-dnd'),
+
 ]
