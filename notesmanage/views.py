@@ -1,28 +1,32 @@
-import os
-import heapq
-from rest_framework.exceptions import ValidationError
-from rest_framework import generics, permissions, status
+import os, shutil
+import tempfile
+import subprocess
+from django.conf import settings
+from django.core.files import File
+import jieba
+import jieba.analyse
+import uuid
+from PIL import Image, ImageDraw, ImageFont
+from .utils import extract_keywords, generate_cover_images
+from django.db import transaction
+from rest_framework.exceptions import ValidationError, PermissionDenied
+from rest_framework import generics, permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.generics import RetrieveAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import Note, Comment, Like, TopNote, Favorite
+from notifications.models import Notification
+from .models import Note, Comment, Like, TopNote, Favorite, DraftNote, NoteImage, NoteFile
 from .pagination import SubCommentPagination, RootCommentPagination
 from django.core.paginator import Paginator
 from rest_framework.pagination import PageNumberPagination
-from .serializers import NoteSerializer, CommentSerializer, NoteSimpleSerializer, NoteLikeSerializer, NoteFavoriteSerializer, UserSerializer
-from django.db.models import (
-    F, Func, Count, Case, When, Value,
-    IntegerField, FloatField, ExpressionWrapper,
-    Prefetch
+from .serializers import(
+    NoteSerializer, CommentSerializer, NoteSimpleSerializer, NoteLikeSerializer,
+    NoteFavoriteSerializer, UserSerializer, DraftNoteSerializer
 )
+from django.db.models import Prefetch
 from .utils import UnixTimestamp, get_share_link
 from django.http import HttpResponse, Http404
 from django.shortcuts import get_object_or_404
-from django.db.models.functions import Now, Extract
-from django.utils import timezone
-from datetime import timedelta
-from django.db import connection
 from django.contrib.auth import get_user_model
 from django.db.models import Count, F, ExpressionWrapper, IntegerField, FloatField, Case, When, Value, Q
 from .permissions import IsOwnerOrReadOnly
@@ -30,6 +34,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny, IsAuthenticate
 import fitz  # PyMuPDF
 import docx
 import markdown
+from io import BytesIO
 
 User = get_user_model()
 
@@ -48,25 +53,238 @@ class NoteListView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+def move_file(src_path, dest_dir):
+    os.makedirs(dest_dir, exist_ok=True)
+    dest_path = os.path.join(dest_dir, os.path.basename(src_path))
+    shutil.move(src_path, dest_path)
+    return dest_path
+
+# 草稿笔记
+class DraftNoteViewSet(viewsets.ModelViewSet):
+    queryset = DraftNote.objects.all()
+    serializer_class = DraftNoteSerializer
+
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return super().get_queryset()
+        return super().get_queryset().filter(author=self.request.user)
+
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            draft = serializer.save(author=self.request.user)
+            self.handle_attachments(draft, self.request.FILES)
+
+    def handle_attachments(self, draft, files):
+        # 1. 手动上传封面
+        if 'cover_image' in files:
+            ci = files['cover_image']
+            draft.cover_image.save(ci.name, ci, save=False)
+            draft.uploaded_cover_type = 'uploaded'
+            draft.uploaded_cover_path = draft.cover_image.name
+            draft.save()
+            return
+
+        # 2. 图片集合
+        if files.getlist('note_images'):
+            imgs = files.getlist('note_images')
+            # 删除旧的草稿图片
+            NoteImage.objects.filter(draft_note=draft).delete()
+            for f in imgs:
+                NoteImage.objects.create(draft_note=draft, image=f)
+            first = draft.draft_images.first().image
+            draft.uploaded_cover_type = 'image'
+            draft.uploaded_cover_path = first.name
+            draft.save()
+
+        # 3. 视频封面
+        elif 'note_video' in files:
+            vid = files['note_video']
+            draft.note_video.save(vid.name, vid, save=False)
+            draft.save()
+
+            tmp = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
+            cmd = [
+                settings.FFMPEG_PATH,
+                '-i', draft.note_video.path,
+                '-ss', '00:00:01',
+                '-vframes', '1',
+                '-y', tmp.name
+            ]
+            try:
+                subprocess.run(cmd, check=True)
+                dest = f'draft_covers/{uuid.uuid4().hex}.jpg'
+                os.makedirs(os.path.join(settings.MEDIA_ROOT, 'draft_covers'), exist_ok=True)
+                os.replace(tmp.name, os.path.join(settings.MEDIA_ROOT, dest))
+                draft.uploaded_cover_type = 'video'
+                draft.uploaded_cover_path = dest
+                draft.save()
+            except Exception as e:
+                raise ValidationError(f"视频封面提取失败: {e}")
+            finally:
+                if os.path.exists(tmp.name):
+                    os.remove(tmp.name)
+
+        # 4. 文本生成候选封面
+        covers = generate_cover_images(extract_keywords({
+            'title': draft.title,
+            'content': draft.content,
+            'body': draft.body,
+            'category': draft.category
+        }))
+        draft.generated_covers = covers
+        draft.save()
+
+    @action(detail=True, methods=['post'])
+    def regenerate_covers(self, request, pk=None):
+        draft = self.get_object()
+        if draft.author != request.user:
+            raise PermissionDenied()
+        # 清理旧图
+        for p in draft.generated_covers:
+            f = os.path.join(settings.MEDIA_ROOT, p)
+            if os.path.exists(f):
+                os.remove(f)
+        self.handle_attachments(draft, {})
+        return Response(DraftNoteSerializer(draft, context={'request': request}).data)
+
+    @action(detail=True, methods=['patch'])
+    def select_cover(self, request, pk=None):
+        draft = self.get_object()
+        if draft.author != request.user:
+            raise PermissionDenied()
+        t = request.data.get('type')
+        url = request.data.get('url')
+
+        if t == 'uploaded':
+            draft.cover_image.name = draft.uploaded_cover_path
+        elif t == 'generated':
+            key = url.split(settings.MEDIA_URL)[-1]
+            if key not in draft.generated_covers:
+                raise ValidationError('无效封面')
+            draft.cover_image.name = key
+        else:
+            raise ValidationError('无效类型')
+
+        draft.save()
+        return Response({'msg': '封面更新成功'})
+
+
 # 新建笔记，没有在后端可视化验证，可能需要在前端验证，前端可能需要配置CKEDITOR_5
-class NoteCreateView(generics.ListCreateAPIView):
+# class NoteCreateView(generics.ListCreateAPIView):
+#     queryset = Note.objects.all()
+#     serializer_class = NoteSerializer
+#     # permission_classes = [IsAuthenticated]
+#     permission_classes = [AllowAny]
+#     def perform_create(self, serializer):
+#         serializer.save(author=self.request.user)
+#
+#     def create(self, request, *args, **kwargs):
+#         serializer = self.get_serializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+#         self.perform_create(serializer)
+#         headers = self.get_success_headers(serializer.data)
+#         return Response({
+#             "code": status.HTTP_201_CREATED,
+#             "message": "Note created successfully",
+#             "data": serializer.data
+#         }, status=status.HTTP_201_CREATED, headers=headers)
+
+class PublishedNoteViewSet(viewsets.ModelViewSet):
     queryset = Note.objects.all()
     serializer_class = NoteSerializer
-    # permission_classes = [IsAuthenticated]
-    permission_classes = [AllowAny]
-    def perform_create(self, serializer):
-        serializer.save(author=self.request.user)
 
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
-        headers = self.get_success_headers(serializer.data)
-        return Response({
-            "code": status.HTTP_201_CREATED,
-            "message": "Note created successfully",
-            "data": serializer.data
-        }, status=status.HTTP_201_CREATED, headers=headers)
+    @action(detail=False, methods=['post'])
+    def publish(self, request):
+        draft_id = request.data.get('draft_id')
+        try:
+            draft_id = int(draft_id)
+        except (TypeError, ValueError):
+            raise ValidationError({'draft_id': '草稿 ID 无效'})
+
+        draft = request.user.draft_notes.filter(id=draft_id).first()
+        if not draft:
+            raise ValidationError({'draft_id': '无效草稿'})
+        if not draft.cover_image:
+            raise ValidationError({'cover_image': '必须选择封面'})
+
+        with transaction.atomic():
+            # 创建正式笔记
+            note = Note.objects.create(
+                title=draft.title,
+                content=draft.content,
+                category=draft.category,
+                body=draft.body,
+                author=draft.author,
+            )
+
+            # 搬迁草稿图片到正式笔记
+            for img in draft.draft_images.all():
+                new_path = move_file(
+                    img.image.path,
+                    os.path.join(settings.MEDIA_ROOT, 'note_images', str(note.id))
+                )
+                NoteImage.objects.create(
+                    published_note=note,
+                    image=f'note_images/{note.id}/{os.path.basename(new_path)}'
+                )
+
+            # 搬迁视频
+            if draft.note_video:
+                new_path = move_file(
+                    draft.note_video.path,
+                    os.path.join(settings.MEDIA_ROOT, 'note_videos', str(note.id))
+                )
+                note.note_video.name = f'note_videos/{note.id}/{os.path.basename(new_path)}'
+
+            # 搬迁封面
+            if draft.cover_image:
+                new_path = move_file(
+                    draft.cover_image.path,
+                    os.path.join(settings.MEDIA_ROOT, 'covers', str(note.id))
+                )
+                note.cover_image.name = f'covers/{note.id}/{os.path.basename(new_path)}'
+
+            # 可选：搬迁草稿中的文件附件（若 DraftNote 定义了 file_attachments）
+            if hasattr(draft, 'file_attachments'):
+                for file in draft.file_attachments.all()[:3]:
+                    new_path = move_file(
+                        file.file.path,
+                        os.path.join(settings.MEDIA_ROOT, 'note_files', str(note.id))
+                    )
+                    nf = NoteFile.objects.create(
+                        file=f'note_files/{note.id}/{os.path.basename(new_path)}'
+                    )
+                    note.file_attachments.add(nf)
+
+            note.save()
+
+            # 验证序列化
+            serialized = NoteSerializer(note, context={'request': request}).data
+            # 删除草稿
+            draft.delete()
+
+        return Response(serialized, status=status.HTTP_201_CREATED)
+
+
+# 封面缩略图生成
+class CoverThumbnailView(APIView):
+    def get(self, request, note_id, filename):
+        note = get_object_or_404(Note, pk=note_id)
+        original_path = next((p for p in note.generated_covers if filename in p), None)
+
+        if not original_path:
+            return HttpResponse(status=404)
+
+        full_path = os.path.join(settings.MEDIA_ROOT, original_path)
+
+        try:
+            with Image.open(full_path) as img:
+                img.thumbnail((300, 200))
+                buffer = BytesIO()
+                img.save(buffer, format="JPEG", quality=85)
+                return HttpResponse(buffer.getvalue(), content_type="image/jpeg")
+        except Exception as e:
+            return HttpResponse(str(e), status=500)
 
 
 # 使用表单经过验证，但网页十分简洁，详见templates目录下的create_note.html（该目录下的另一个文件夹中的.html暂时没有使用）
@@ -81,39 +299,39 @@ class NoteCreateView(generics.ListCreateAPIView):
 
 
 # 定义了一些预览上传的笔记文件的方法，已验证 （PDF文件有的可以预览内容有的不行）
-def preview_note(request, note_id):
-    note = get_object_or_404(Note, id=note_id)
-    file_path = note.file.path if note.file else None
-
-    if not file_path:
-        return HttpResponse("No file attached to this note.")
-
-    file_extension = os.path.splitext(file_path)[1].lower()
-
-    if file_extension == '.pdf':
-        # 使用 PyMuPDF 将 PDF 转换为 HTML
-        with fitz.open(file_path) as doc:
-            html_content = ""
-            for page in doc:
-                html_content += page.get_text("html")
-            return HttpResponse(html_content)
-
-    elif file_extension in ['.doc', '.docx']:
-        # 使用 python-docx 将 Word 转换为 HTML
-        document = docx.Document(file_path)
-        html_content = ""
-        for paragraph in document.paragraphs:
-            html_content += f"<p>{paragraph.text}</p>"
-        return HttpResponse(html_content)
-
-    elif file_extension == '.md':
-        # 使用 markdown 库将 Markdown 转换为 HTML
-        with open(file_path, 'r') as f:
-            markdown_content = f.read()
-            html_content = markdown.markdown(markdown_content)
-            return HttpResponse(html_content)
-    else:
-        raise Http404("Unsupported file type.")
+# def preview_note(request, note_id):
+#     note = get_object_or_404(Note, id=note_id)
+#     file_path = note.file.path if note.file else None
+#
+#     if not file_path:
+#         return HttpResponse("No file attached to this note.")
+#
+#     file_extension = os.path.splitext(file_path)[1].lower()
+#
+#     if file_extension == '.pdf':
+#         # 使用 PyMuPDF 将 PDF 转换为 HTML
+#         with fitz.open(file_path) as doc:
+#             html_content = ""
+#             for page in doc:
+#                 html_content += page.get_text("html")
+#             return HttpResponse(html_content)
+#
+#     elif file_extension in ['.doc', '.docx']:
+#         # 使用 python-docx 将 Word 转换为 HTML
+#         document = docx.Document(file_path)
+#         html_content = ""
+#         for paragraph in document.paragraphs:
+#             html_content += f"<p>{paragraph.text}</p>"
+#         return HttpResponse(html_content)
+#
+#     elif file_extension == '.md':
+#         # 使用 markdown 库将 Markdown 转换为 HTML
+#         with open(file_path, 'r') as f:
+#             markdown_content = f.read()
+#             html_content = markdown.markdown(markdown_content)
+#             return HttpResponse(html_content)
+#     else:
+#         raise Http404("Unsupported file type.")
 
 
 # 异步功能根据热度排出的Top 10，已验证并推荐使用
@@ -548,12 +766,19 @@ class FollowToggleView(generics.GenericAPIView):
         # 如果已经关注，则取消关注；否则关注
         if target_user in current_user.following.all():
             current_user.following.remove(target_user)
+            # 同时删除对应的关注通知
+            Notification.objects.filter(
+                recipient=target_user,
+                sender=current_user,
+                notification_type='follow'
+            ).delete()
             return Response({'detail': '已取消关注'}, status=status.HTTP_204_NO_CONTENT)
         else:
             current_user.following.add(target_user)
             return Response({'detail': '关注成功'}, status=status.HTTP_201_CREATED)
 
 
+# 关注列表
 class FollowedUsersListView(generics.ListAPIView):
     """
     列出当前登录用户关注的所有用户（已关注列表）
@@ -563,3 +788,13 @@ class FollowedUsersListView(generics.ListAPIView):
 
     def get_queryset(self):
         return self.request.user.following.all()
+
+
+# 粉丝列表
+class FollowersListView(generics.ListAPIView):
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # 获取当前登录用户的所有粉丝
+        return self.request.user.followers.all()

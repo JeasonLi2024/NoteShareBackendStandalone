@@ -213,24 +213,15 @@ class UserUpdateView(RetrieveUpdateAPIView):
             return str(error_data)
 
 # 视图集
-class UserViewSet(viewsets.ViewSet):
+class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [AllowAny]
 
-    def get_object(self, pk):
-        try:
-            return User.objects.get(pk=pk)
-        except User.DoesNotExist:
-            raise NotFound("User not found")
-
-    def get_serializer(self, *args, **kwargs):
-        return self.serializer_class(*args, **kwargs)
-
     # 获取用户列表 '/user/users'
-    def list(self, request):
-        users = User.objects.all()
-        serializer = UserSerializer(users, many=True)
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True, context={'request': request})
         return Response({
             "code": status.HTTP_200_OK,
             "message": "success",
@@ -239,34 +230,18 @@ class UserViewSet(viewsets.ViewSet):
 
     # 获取单个用户信息 访问`user/users/<pk>/` 就会映射到 `UserViewSet` 的 `retrieve` 方法，其中 `<pk>` 是用户的主键（通常是用户ID）
     def retrieve(self, request, pk=None):
-        # 检查请求的用户是否是管理员或请求的用户ID是否与当前用户ID匹配
-        if not (request.user.is_staff or str(request.user.id) == pk):
-            return Response({
-                "code": status.HTTP_403_FORBIDDEN,
-                "message": "You do not have permission to access this user's information.",
-                "data": None
-            }, status=status.HTTP_403_FORBIDDEN)
-
-        user = get_object_or_404(User, pk=pk)
-        serializer = self.get_serializer(user)
+        user = self.get_object()  # 利用 ModelViewSet 内置的对象检索方法
+        serializer = self.get_serializer(user, context={'request': request})
         return Response({
             "code": status.HTTP_200_OK,
             "message": "success",
             "data": serializer.data
         }, status=status.HTTP_200_OK)
 
-
     # 获取当前用户信息 'user/users/me'
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def me(self, request):
-        if not request.user.is_authenticated:
-            return Response({
-                "code": status.HTTP_401_UNAUTHORIZED,
-                "message": "unauthenticated",
-                "data": {}
-            }, status=status.HTTP_401_UNAUTHORIZED)
-
-        serializer = self.get_serializer(request.user)
+        serializer = self.get_serializer(request.user, context={'request': request})
         return Response({
             "code": status.HTTP_200_OK,
             "message": "success",
@@ -276,20 +251,11 @@ class UserViewSet(viewsets.ViewSet):
     # 用户选择注销当前账号 'user/users/delete_me‘
     @action(detail=False, methods=['delete'], permission_classes=[IsAuthenticated])
     def delete_me(self, request):
-        if not request.user.is_authenticated:
-            return Response({
-                "code": status.HTTP_401_UNAUTHORIZED,
-                "message": "unauthenticated",
-                "data": {}
-            }, status=status.HTTP_401_UNAUTHORIZED)
-
-        # 获取当前认证的用户
-        current_user = request.user
-        # 删除用户
-        current_user.delete()
+        # DRF 已经处理了认证，所以直接删除用户
+        request.user.delete()
         return Response({
             "code": status.HTTP_204_NO_CONTENT,
-            "message": "success",
+            "message": "Account deleted successfully",
             "data": {}
         }, status=status.HTTP_204_NO_CONTENT)
 

@@ -3,8 +3,11 @@ from django.db.models.signals import post_save, post_delete, m2m_changed
 from django.dispatch import receiver
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from .models import Note, Like, Comment, Favorite
+from .models import Note, Like, Comment, Favorite, DraftNote
 from django.contrib.auth import get_user_model
+import os
+import glob
+from django.conf import settings
 # 导入通知模型
 from notifications.models import Notification
 
@@ -79,13 +82,27 @@ def send_note_like_notification(sender, instance, created, **kwargs):
                 recipient=note.author,
                 sender=user,
                 notification_type='note_like',
-                message=f"{user.username} 点赞了你的笔记《{note.title}》"
+                message=f"{user.username} 点赞了你的笔记《{note.title}》",
+                extra_data={
+                    'like_id': instance.id,
+                    'note_id': instance.note.id,
+                }
             )
             push_notification(note.author, notification)
 
+@receiver(post_delete, sender=Like)
+def delete_note_like_notification(sender, instance, **kwargs):
+    Notification.objects.filter(
+        recipient=instance.note.author,
+        sender=instance.user,
+        notification_type='note_like',
+        extra_data__like_id=instance.id
+    ).delete()
+
+
 # 2. 笔记收藏通知
 @receiver(post_save, sender=Favorite)
-def send_note_like_notification(sender, instance, created, **kwargs):
+def send_note_favorite_notification(sender, instance, created, **kwargs):
     if created:
         note = instance.note
         user = instance.user
@@ -95,9 +112,23 @@ def send_note_like_notification(sender, instance, created, **kwargs):
                 recipient=note.author,
                 sender=user,
                 notification_type='note_favorite',
-                message=f"{user.username} 收藏了你的笔记《{note.title}》"
+                message=f"{user.username} 收藏了你的笔记《{note.title}》",
+                extra_data={
+                    'favorite_id': instance.id,
+                    'note_id': instance.note.id,
+                }
             )
             push_notification(note.author, notification)
+
+@receiver(post_delete, sender=Favorite)
+def delete_note_favorite_notification(sender, instance, **kwargs):
+    Notification.objects.filter(
+        recipient=instance.note.author,
+        sender=instance.user,
+        notification_type='note_favorite',
+        extra_data__favorite_id=instance.id
+    ).delete()
+
 
 # 3. 笔记评论 & 评论回复通知：在 Comment 创建时根据 parent 字段区分
 @receiver(post_save, sender=Comment)
@@ -112,7 +143,11 @@ def send_comment_notification(sender, instance, created, **kwargs):
                     recipient=note.author,
                     sender=user,
                     notification_type='note_comment',
-                    message=f"{user.username} 评论了你的笔记《{note.title}》"
+                    message=f"{user.username} 评论了你的笔记《{note.title}》",
+                    extra_data={
+                        'comment_id': instance.id,
+                        'note_id': note.id
+                    }
                 )
                 push_notification(note.author, notification)
         else:
@@ -123,9 +158,24 @@ def send_comment_notification(sender, instance, created, **kwargs):
                     recipient=parent_user,
                     sender=user,
                     notification_type='comment_reply',
-                    message=f"{user.username} 回复了你的评论：{instance.content[:20]}..."
+                    message=f"{user.username} 回复了你的评论：{instance.content[:20]}...",
+                    extra_data={
+                        'comment_id': instance.id,
+                        'note_id': note.id
+                    }
                 )
                 push_notification(parent_user, notification)
+
+@receiver(post_delete, sender=Comment)
+def update_notification_on_comment_delete(sender, instance, **kwargs):
+    notifications = Notification.objects.filter(
+        extra_data__comment_id=instance.id,
+        notification_type__in=['note_comment', 'comment_reply']
+    )
+    for notification in notifications:
+        notification.message = "该评论不存在。"
+        notification.save(update_fields=["message"])
+
 
 # 4. 评论点赞通知：使用 m2m_changed 信号监听 Comment.likes 变化
 @receiver(m2m_changed, sender=Comment.likes.through)
@@ -133,18 +183,30 @@ def send_comment_like_notification(sender, instance, action, pk_set, **kwargs):
     if action == "post_add":
         for user_id in pk_set:
             try:
-                liker = User.objects.get(pk=user_id)
+                liker = User.objects.get(id=user_id)
+                if liker != instance.user:
+                    notification = Notification.objects.create(
+                        recipient=instance.user,
+                        sender=liker,
+                        notification_type='comment_like',
+                        message=f"{liker.username} 给你的评论点赞",
+                        extra_data={
+                            'comment_id': instance.id,
+                            'note_id': instance.note.id
+                        }
+                    )
+                    push_notification(instance.user, notification)
             except User.DoesNotExist:
                 continue
-            # 避免用户给自己点赞的情况
-            if instance.user != liker:
-                notification = Notification.objects.create(
-                    recipient=instance.user,
-                    sender=liker,
-                    notification_type='comment_like',
-                    message=f"{liker.username} 给你的评论点赞"
-                )
-                push_notification(instance.user, notification)
+    elif action == "post_remove":
+        for user_id in pk_set:
+            Notification.objects.filter(
+                recipient=instance.user,
+                sender_id=user_id,
+                notification_type='comment_like',
+                extra_data__comment_id=instance.id
+            ).delete()
+
 
 # 5. 用户关注
 @receiver(m2m_changed, sender=User.following.through)
@@ -162,7 +224,8 @@ def send_follow_notification(sender, instance, action, pk_set, **kwargs):
                 recipient=target_user,
                 sender=instance,
                 notification_type='follow',
-                message=f"{instance.username} 关注了你"
+                message=f"{instance.username} 关注了你",
+                extra_data={'followed_user_id': instance.id}
             )
             # 推送通知到 target_user 的 websocket 连接
             push_notification(target_user, notification)

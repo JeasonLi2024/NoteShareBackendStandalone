@@ -6,15 +6,42 @@ UserModel = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
     phone = serializers.CharField(required=False)
+    avatar = serializers.SerializerMethodField()
+    is_following = serializers.SerializerMethodField()
+
     class Meta:
         model = UserModel
         fields = (
             'id', 'username', 'email', 'avatar', 'phone', 'created_at', 'last_login',
-            'school', 'major', 'grade', 'introduction'  # 添加新的字段
+            'school', 'major', 'grade', 'introduction', 'total_likes', 'total_views',
+            'following_count', 'followers_count', 'is_following'  # 添加新的字段
         )
         extra_kwargs = {'password': {'write_only': True}}
         read_only_fields = ('created_at', 'last_login')
         ref_name = 'UserAppUserSerializer'
+
+    def get_following_count(self, obj):
+        return obj.following.count()
+
+    def get_followers_count(self, obj):
+        return obj.followers.count()
+
+    def get_avatar(self, obj):
+        request = self.context.get('request')
+        # 假设 avatar 是一个 ImageField 或者其他类型的字段
+        # 返回头像的 URL 或其他相关信息
+        if not request or not obj.avatar:
+            return None  # 或者返回一个默认的值
+        return request.build_absolute_uri(obj.avatar.url)
+
+    def get_is_following(self, obj):
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated:
+            # 检查当前请求用户的 following 集合中是否存在该对象
+            return request.user.following.filter(id=obj.id).exists()
+        return False
+
+
 
 class UserCreateSerializer(serializers.ModelSerializer):
     avatar = serializers.ImageField(required=False, allow_null=True)

@@ -1,10 +1,22 @@
 from django.contrib import admin
 from django_ckeditor_5.fields import CKEditor5Field
 from django_ckeditor_5.widgets import CKEditor5Widget
-from .models import Note, TopNote, Comment
+from .models import Note, TopNote, Comment, NoteImage
 from django.core.mail import send_mail
 from django.conf import settings
 from django.db.models import Q
+
+class NoteImageInline(admin.TabularInline):
+    model = NoteImage
+    extra = 1
+    fields = ['image', 'image_preview']
+    readonly_fields = ['image_preview']
+
+    def image_preview(self, obj):
+        if obj.image:
+            return f'<img src="{obj.image.url}" style="max-height: 100px;" />'
+        return "-"
+    image_preview.allow_tags = True
 
 
 @admin.register(Note)

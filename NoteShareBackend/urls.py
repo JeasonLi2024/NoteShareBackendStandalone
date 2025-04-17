@@ -46,6 +46,7 @@ urlpatterns = [
     path('user/', include('user.urls')),
     path('notesmanage/', include('notesmanage.urls')),
     path('notifications/', include('notifications.urls')),
+    path('chat/', include('chat.urls')),
 
     # 更新功能已经包含头像更新
     path('user/update/', UserUpdateView.as_view(), name='user-update'),

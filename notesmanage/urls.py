@@ -1,14 +1,30 @@
 from django.conf import settings
 from django.conf.urls.static import static
-from django.urls import path
+from django.urls import path, include
 from notesmanage.views import (
-    UserNotesView, NoteCreateView, NoteRetrieveUpdateDestroyView,
+    UserNotesView,  NoteRetrieveUpdateDestroyView,
     NoteLikeView,  NoteSearchView, CommentDestroyView, CommentLikeView,
-    TopNotesView, preview_note, NoteListView, NotesByCategoryView,
+    TopNotesView,  NoteListView, NotesByCategoryView,
     UserLikedNotesView, CommentListCreateView, CommentDislikeView, SubCommentListView,
-    UserFavoriteNotesView, NoteFavoriteView, FollowToggleView, FollowedUsersListView
+    UserFavoriteNotesView, NoteFavoriteView, FollowToggleView, FollowedUsersListView,
+    FollowersListView, CoverThumbnailView
 )
 from .ai_conclude import spark_lite
+from rest_framework.routers import DefaultRouter
+from .views import DraftNoteViewSet, PublishedNoteViewSet
+
+# 使用 DRF 的 DefaultRouter 自动注册 ViewSet 路由
+router = DefaultRouter()
+# 草稿笔记路由：支持 list/create/retrieve/update/destroy
+# 自定义操作：
+#   POST   drafts/{pk}/regenerate_covers/   重新生成 AI 候选封面
+#   PATCH  drafts/{pk}/select_cover/        选择封面（上传或生成）
+router.register(r'drafts', DraftNoteViewSet, basename='draft')
+
+# 正式笔记路由：支持 list/create/retrieve/update/destroy
+# 自定义操作：
+#   POST   notes/publish/                  从草稿发布为正式笔记，需要传 draft_id
+router.register(r'notes', PublishedNoteViewSet, basename='note')
 
 urlpatterns = [
                   # 通过表单实现的笔记上传页面
@@ -18,13 +34,17 @@ urlpatterns = [
                   # 访问某一用户的所有（公开）笔记
                   path('user/<int:user_id>/notes/', UserNotesView.as_view(), name='user-notes'),
                   # 使用视图逻辑的用户创建笔记
-                  path('notes/create', NoteCreateView.as_view(), name='note-list-create'),
+                  # path('notes/create', NoteCreateView.as_view(), name='note-list-create'),
+                  # 封面图预览
+                  path('notes/<int:note_id>/covers/thumbnail/<str:filename>/',CoverThumbnailView.as_view(), name='cover-thumbnail'),
                   # 多功能，集笔记访问（客人用户访问时read_only，同时浏览数增加；笔记所有者访问时可以对笔记进行修改和删除）
                   path('notes/<int:pk>/', NoteRetrieveUpdateDestroyView.as_view(), name='note-retrieve-update-destroy'),
                   # 关注功能
                   path('follow/<int:pk>/', FollowToggleView.as_view(), name='follow-toggle'),
                   # 关注列表
                   path('following/', FollowedUsersListView.as_view(), name='followed-users'),
+                  # 粉丝列表
+                  path('followers/', FollowersListView.as_view(), name='followers'),
                   # 点赞功能
                   path('notes/<int:pk>/like/', NoteLikeView.as_view(), name='note-like'),
                   # 用户点过赞的笔记
@@ -51,8 +71,43 @@ urlpatterns = [
                   # 按类别的热度排序
                   path('notes/category/<str:category>/page/<int:page_number>/', NotesByCategoryView.as_view(), name='notes_by_category'),
                   # 笔记预览
-                  path('notes/<int:note_id>/preview/', preview_note, name='note-preview'),
+                  # path('notes/<int:note_id>/preview/', preview_note, name='note-preview'),
                   # AI笔记总结
                   path('notes/ai_conclude/', spark_lite, name='note-ai_conclude'),
+                  path('', include(router.urls)),
 
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+
+"""
+GET /api/drafts/ 草稿列表
+
+POST /api/drafts/ 新建草稿
+
+GET /api/drafts/{pk}/ 获取草稿详情
+
+PUT /api/drafts/{pk}/ 更新草稿（整体替换）
+
+PATCH /api/drafts/{pk}/ 更新草稿（部分字段）
+**草稿在没发布前可以随时更新，PUT/PATCH 都行**
+
+DELETE /api/drafts/{pk}/ 删除草稿
+
+POST /api/drafts/{pk}/regenerate_covers/ 重新生成 AI 候选封面
+
+PATCH /api/drafts/{pk}/select_cover/ 选择封面
+
+GET /api/notes/ 正式笔记列表
+
+POST /api/notes/ 新建正式笔记（如果需要）
+
+GET /api/notes/{pk}/ 获取正式笔记详情
+
+PUT /api/notes/{pk}/ 更新正式笔记
+
+PATCH /api/notes/{pk}/ 更新正式笔记（可用于修改封面、正文等）
+
+DELETE /api/notes/{pk}/ 删除正式笔记
+
+POST /api/notes/publish/ 从草稿发布正式笔记（请求体需 { "draft_id": <id> }）
+"""

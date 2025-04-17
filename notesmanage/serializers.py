@@ -1,19 +1,23 @@
 # serializers.py
-from django.core.cache import cache
+import os
 from rest_framework import serializers
-from .models import Note, Comment, Like, Favorite
+from NoteShareBackend import settings
+from .models import Note, Comment, Like, Favorite, NoteImage, DraftNote, NoteFile
 from django.contrib.auth import get_user_model
 import pytz
 
+from .utils import compress_image
 
 User = get_user_model()
 
 
 class UserSerializer(serializers.ModelSerializer):
     avatar = serializers.SerializerMethodField()
+    is_following = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ['id', 'username', 'avatar', 'total_likes', 'total_views', 'following_count', 'followers_count', 'introduction']
+        fields = ['id', 'username', 'avatar', 'total_likes', 'total_views', 'following_count', 'followers_count', 'introduction', 'is_following']
         ref_name = 'NotesManageUserSerializer'
 
     def get_following_count(self, obj):
@@ -29,6 +33,13 @@ class UserSerializer(serializers.ModelSerializer):
         if obj.avatar:
             return request.build_absolute_uri(obj.avatar.url)
         return None
+
+    def get_is_following(self, obj):
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated:
+            # 检查当前请求用户的 following 集合中是否存在该对象
+            return request.user.following.filter(id=obj.id).exists()
+        return False
 
 
 class CommentSerializer(serializers.ModelSerializer):
@@ -92,16 +103,66 @@ class CommentSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
+class NoteImageSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = NoteImage
+        fields = ['id', 'url']
+
+    def get_url(self, obj):
+        return self.context['request'].build_absolute_uri(obj.image.url)
+
+class NoteFileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NoteFile
+        fields = ['file']
+
+class DraftNoteSerializer(serializers.ModelSerializer):
+    draft_images = NoteImageSerializer(many=True, read_only=True)
+    cover_options = serializers.SerializerMethodField()
+    author = UserSerializer(read_only=True)
+
+    class Meta:
+        model = DraftNote
+        fields = '__all__'
+        read_only_fields = ['author', 'created_at', 'updated_at', 'last_modified', 'generated_covers']
+
+    def get_cover_options(self, obj):
+        req = self.context['request']
+        opts = []
+        if obj.uploaded_cover_path:
+            opts.append({
+                'type': 'uploaded',
+                'source': obj.uploaded_cover_type,
+                'url': req.build_absolute_uri(settings.MEDIA_URL + obj.uploaded_cover_path)
+            })
+        for p in obj.generated_covers:
+            opts.append({
+                'type': 'generated',
+                'url': req.build_absolute_uri(settings.MEDIA_URL + p)
+            })
+        return opts
+
+
+
 class NoteSerializer(serializers.ModelSerializer):
     # author_info = serializers.SerializerMethodField()
+    # cover_previews = serializers.SerializerMethodField()
+    cover_image = serializers.ImageField(required=False, allow_null=True)
+    # generated_covers = serializers.JSONField(read_only=True)
     author = UserSerializer(read_only=True)
     is_liked = serializers.SerializerMethodField()
+    is_favorited = serializers.SerializerMethodField()
+    # cover_options = serializers.SerializerMethodField()
     # comments = CommentSerializer(many=True, read_only=True)
+    images = NoteImageSerializer(many=True, read_only=True, source='published_images')
+    file_attachments = NoteFileSerializer(many=True, read_only=True)
 
     class Meta:
         model = Note
         fields = '__all__'
-        read_only_fields = ['author', 'likes', 'views_count', 'likes_count', 'comments_count']
+        read_only_fields = ['author', 'views_count', 'likes_count', 'comments_count']
 
     def get_author_info(self, obj):
         request = self.context.get('request')
@@ -120,15 +181,59 @@ class NoteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("内容至少需要10个字符")
         return value
 
-    def create(self, validated_data):
-        validated_data['author'] = self.context['request'].user
-        return super().create(validated_data)
+    # def get_image_urls(self, obj):
+    #     return [img.image.url for img in obj.images.all()]
+    # def get_cover_previews(self, obj):
+    #     """
+    #     返回当前封面图的预览 URL 列表，通常只有一张：
+    #     """
+    #     request = self.context['request']
+    #     if obj.cover_image:
+    #         return [request.build_absolute_uri(obj.cover_image.url)]
+    #     return []
+    #
+    # def create(self, validated_data):
+    #     # 设置当前用户为作者
+    #     validated_data['author'] = self.context['request'].user
+    #
+    #     # 提取上传的图片
+    #     uploaded_images = validated_data.pop('images', [])
+    #
+    #     # 创建主对象
+    #     note = super().create(validated_data)
+    #
+    #     # 处理并保存图片
+    #     for img in uploaded_images:
+    #         try:
+    #             # 压缩图片
+    #             compressed_img = compress_image(img)
+    #
+    #             # 创建图片记录
+    #             NoteImage.objects.create(
+    #                 note=note,
+    #                 image=compressed_img
+    #             )
+    #         except Exception as e:
+    #             # 可以记录日志或跳过错误
+    #             continue
+    #
+    #     return note
+    # def get_cover_options(self, obj):
+    #     # 保留草稿时的生成封面记录
+    #     return obj.generated_covers
 
     def get_is_liked(self, obj):
         # 判断当前用户是否已点赞该笔记
         user = self.context['request'].user
         if user.is_authenticated:
             return obj.likes.filter(id=user.id).exists()
+        return False
+
+    def get_is_favorited(self, obj):
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated:
+            # 判断当前用户是否收藏了该笔记
+            return Favorite.objects.filter(note=obj, user=request.user).exists()
         return False
 
 # 简化笔记信息

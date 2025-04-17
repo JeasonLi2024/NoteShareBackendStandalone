@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'drf_yasg',
     'user',
     'notesmanage',
+    'chat',
 
 ]
 
@@ -213,6 +214,9 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# 封面图生成配置
+COVER_BG_DIR = os.path.join(MEDIA_ROOT, 'cover_bgs')  # 存放纯色背景图
+FONT_DIR = os.path.join(BASE_DIR, 'staticfiles/fonts')     # 存放中文字体文件
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
@@ -412,3 +416,6 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 30,  # 每5分钟执行一次
     },
 }
+
+
+FFMPEG_PATH = r"E:\ffmpeg-7.1.1-full_build-shared\bin\ffmpeg.exe"
