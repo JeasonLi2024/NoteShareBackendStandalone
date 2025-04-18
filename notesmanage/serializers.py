@@ -6,8 +6,6 @@ from .models import Note, Comment, Like, Favorite, NoteImage, DraftNote, NoteFil
 from django.contrib.auth import get_user_model
 import pytz
 
-from .utils import compress_image
-
 User = get_user_model()
 
 
@@ -122,6 +120,7 @@ class DraftNoteSerializer(serializers.ModelSerializer):
     draft_images = NoteImageSerializer(many=True, read_only=True)
     cover_options = serializers.SerializerMethodField()
     author = UserSerializer(read_only=True)
+    draft_files = NoteFileSerializer(many=True, read_only=True)
 
     class Meta:
         model = DraftNote
@@ -156,8 +155,8 @@ class NoteSerializer(serializers.ModelSerializer):
     is_favorited = serializers.SerializerMethodField()
     # cover_options = serializers.SerializerMethodField()
     # comments = CommentSerializer(many=True, read_only=True)
-    images = NoteImageSerializer(many=True, read_only=True, source='published_images')
-    file_attachments = NoteFileSerializer(many=True, read_only=True)
+    note_images = NoteImageSerializer(many=True, read_only=True, source='published_images')
+    note_files = NoteFileSerializer(many=True, read_only=True, source='published_files')
 
     class Meta:
         model = Note

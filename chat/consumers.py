@@ -13,7 +13,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         # 判断对话是否存在，并检查当前用户是否为参与者
         conversation = await self.get_conversation(self.conversation_id)
-        if not conversation or not await self.user_in_conversation(self.user, conversation):
+        if not conversation :
+            await self.close()
+            return
+
+        # 检查当前用户是否为 author 或 visitor
+        if not await self.user_in_conversation(self.user, conversation):
             await self.close()
             return
 
@@ -22,18 +27,22 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.close()
             return
 
+        # 加入频道组并接受连接
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
 
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
-    async def receive(self, text_data):
+    async def receive(self, text_data=None, bytes_data=None):
         """
         处理收到的消息，检查发送限制后保存消息并广播
         前端发送 JSON：{"content": "消息内容", "message_type": "text"}
         （附件情况可通过其他方式上传后返回 URL，再发送消息）
         """
+        if text_data is None:
+            return  # 忽略空数据
+
         data = json.loads(text_data)
         content = data.get('content', '')
         message_type = data.get('message_type', 'text')
@@ -103,7 +112,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
         """
         如果当前对话为私信（双人聊天），并且作者拉黑了访客，则当用户为访客时返回 True。
         """
-        # 注意：这里假设 Conversation 必须有 author 和 visitor 两个字段
         if conversation.author and conversation.visitor:
             if user == conversation.visitor and conversation.author_blocked:
                 return True

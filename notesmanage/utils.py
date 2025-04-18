@@ -69,52 +69,103 @@ def extract_keywords(note_data):
     return combined or "默认封面"
 
 
-def generate_cover_images(keyword):
-    """生成5张艺术化封面图"""
+def choose_contrast_color(bg_color):
+    """根据背景 RGB 三通道计算亮度，返回黑或白对比色，也可扩展为某色调"""
+    r, g, b = bg_color
+    # 计算相对亮度
+    lum = (0.299*r + 0.587*g + 0.114*b)
+    return (0,0,0) if lum > 186 else (255,255,255)
+
+
+def wrap_text(text, font, max_width, draw):
+    """将 text 拆分为多行，使每行宽度不超过 max_width"""
+    words = list(text)
+    lines = []
+    current = ""
+    for char in words:
+        if draw.textlength(current + char, font=font) <= max_width:
+            current += char
+        else:
+            lines.append(current)
+            current = char
+    if current:
+        lines.append(current)
+    return lines
+
+
+def generate_cover_images(keyword, draft_id):
     generated_paths = []
     bg_dir = os.path.join(settings.MEDIA_ROOT, 'cover_bgs')
     font_dir = os.path.join(settings.STATIC_ROOT, 'fonts')
+    illu_dir = os.path.join(settings.STATIC_ROOT, 'illustrations')
 
     for _ in range(5):
-        # 随机选择背景
-        img = Image.open(os.path.join(bg_dir, random.choice(os.listdir(bg_dir)))).convert('RGBA')
+        # 1. 打开背景
+        bg_path = os.path.join(bg_dir, random.choice(os.listdir(bg_dir)))
+        img = Image.open(bg_path).convert('RGBA')
         draw = ImageDraw.Draw(img)
 
-        # 随机选择字体
+        # 2. 文字属性
         font_file = random.choice(os.listdir(font_dir))
-        font_size = random.randint(36, 72)
-        try:
-            font = ImageFont.truetype(os.path.join(font_dir, font_file), font_size)
-        except:
-            font = ImageFont.load_default()
+        base_font_size = random.randint(48, 72)
+        font = ImageFont.truetype(os.path.join(font_dir, font_file), base_font_size)
 
-        # 随机文字样式
-        text_color = (
-            random.randint(50, 200),
-            random.randint(50, 200),
-            random.randint(50, 200)
-        )
-        shadow_color = (255 - text_color[0], 255 - text_color[1], 255 - text_color[2])
+        # 3. 自动对比色
+        # 取图片中心小块的平均色
+        w, h = img.size
+        crop = img.crop((w / 4, h / 4, w * 3 / 4, h * 3 / 4)).convert('RGB')
+        avg = tuple(sum(c) // (crop.size[0] * crop.size[1]) for c in zip(*crop.getdata()))
+        text_color = choose_contrast_color(avg)
 
-        # 计算文字位置
-        bbox = draw.textbbox((0, 0), keyword, font=font)
-        text_width = bbox[2] - bbox[0]  # right - left
-        text_height = bbox[3] - bbox[1]  # bottom - top
-        x = random.randint(20, img.width - text_width - 20)
-        y = random.randint(20, img.height - text_height - 20)
+        # 4. 换行并计算整个文本区域高度
+        max_w = w * 0.8
+        lines = wrap_text(keyword, font, max_w, draw)
+        total_h = sum(
+            draw.textbbox((0, 0), line, font=font)[3] - draw.textbbox((0, 0), line, font=font)[1] for line in lines)
+        line_h = (draw.textbbox((0, 0), lines[0], font=font)[3] - draw.textbbox((0, 0), lines[0], font=font)[1])
 
-        # 添加文字阴影
-        draw.text((x + 2, y + 2), keyword, fill=shadow_color, font=font)
-        draw.text((x, y), keyword, fill=text_color, font=font)
+        # 5. 文字起始位置（居中）
+        start_y = (h - total_h) / 2
+        for i, line in enumerate(lines):
+            line_w = draw.textlength(line, font=font)
+            x = (w - line_w) / 2
+            y = start_y + i * (line_h + 10)
 
-        # 保存文件
+            # 5a. 发光描边
+            for dx in (-2, -1, 0, 1, 2):
+                for dy in (-2, -1, 0, 1, 2):
+                    draw.text((x + dx, y + dy), line, font=font, fill=(0, 0, 0, 100))
+            # 5b. 正文
+            draw.text((x, y), line, font=font, fill=text_color)
+
+        # 6. 添加装饰性线条（上下各一条）
+        line_color = choose_contrast_color((255 - avg[0], 255 - avg[1], 255 - avg[2]))
+        thickness = 4
+        draw.line(((w * 0.1, start_y - 20), (w * 0.9, start_y - 20)), fill=line_color, width=thickness)
+        draw.line(((w * 0.1, start_y + total_h + 20), (w * 0.9, start_y + total_h + 20)), fill=line_color,
+                  width=thickness)
+
+        # 7. 随机叠加小插画
+        if os.path.isdir(illu_dir):
+            illus = [f for f in os.listdir(illu_dir) if f.lower().endswith(('.png', '.ico'))]
+            if illus:
+                icon = Image.open(os.path.join(illu_dir, random.choice(illus))).convert('RGBA')
+                # 身份：左下或右上
+                scale = 0.2
+                icon = icon.resize(
+                    (int(w * scale), int(w * scale * icon.height / icon.width)),
+                    resample=Image.Resampling.LANCZOS  # Pillow ≥ 10 推荐
+                )
+                pos = random.choice([(20, h - icon.height - 20), (w - icon.width - 20, 20)])
+                img.alpha_composite(icon, dest=pos)
+
+        # 8. 保存输出
         rgb_img = img.convert('RGB')
-        filename = f'generated_covers/{uuid.uuid4().hex}.jpg'
+        filename = f'generated_covers/{draft_id}/{uuid.uuid4().hex}.jpg'
         full_path = os.path.join(settings.MEDIA_ROOT, filename)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         # 保存时显式指定格式和质量
         rgb_img.save(full_path, format='JPEG', quality=85)
-
         generated_paths.append(filename)
 
     return generated_paths

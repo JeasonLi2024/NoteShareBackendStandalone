@@ -7,7 +7,7 @@ import jieba
 import jieba.analyse
 import uuid
 from PIL import Image, ImageDraw, ImageFont
-from .utils import extract_keywords, generate_cover_images
+from .utils import extract_keywords, generate_cover_images, compress_image
 from django.db import transaction
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from rest_framework import generics, permissions, status, viewsets
@@ -35,6 +35,7 @@ import fitz  # PyMuPDF
 import docx
 import markdown
 from io import BytesIO
+
 
 User = get_user_model()
 
@@ -69,10 +70,23 @@ class DraftNoteViewSet(viewsets.ModelViewSet):
             return super().get_queryset()
         return super().get_queryset().filter(author=self.request.user)
 
-    def perform_create(self, serializer):
-        with transaction.atomic():
-            draft = serializer.save(author=self.request.user)
-            self.handle_attachments(draft, self.request.FILES)
+    def create(self, request, *args, **kwargs):
+        # 1. 验证并保存草稿
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        draft = serializer.save(author=request.user)
+
+        # 2. 处理所有附件（图片／视频／封面／文件）
+        self.handle_attachments(draft, request.FILES)
+
+        # 3. 重新序列化，返回完整对象
+        out_serializer = self.get_serializer(draft, context={'request': request})
+        headers = self.get_success_headers(out_serializer.data)
+        return Response({
+            "code": status.HTTP_201_CREATED,
+            "message": "Draft created successfully",
+            "data": out_serializer.data
+        }, status=status.HTTP_201_CREATED, headers=headers)
 
     def handle_attachments(self, draft, files):
         # 1. 手动上传封面
@@ -86,51 +100,81 @@ class DraftNoteViewSet(viewsets.ModelViewSet):
 
         # 2. 图片集合
         if files.getlist('note_images'):
-            imgs = files.getlist('note_images')
-            # 删除旧的草稿图片
+            images = files.getlist('note_images')
             NoteImage.objects.filter(draft_note=draft).delete()
-            for f in imgs:
-                NoteImage.objects.create(draft_note=draft, image=f)
+
+            for f in images:
+                # 调用 compress_image 压缩
+                try:
+                    compressed = compress_image(f)
+                except ValueError as e:
+                    raise ValidationError(f"图片处理失败：{e}")
+                NoteImage.objects.create(draft_note=draft, image=compressed)
+
+            # 取第一张压缩后的图作为封面预览
             first = draft.draft_images.first().image
             draft.uploaded_cover_type = 'image'
             draft.uploaded_cover_path = first.name
             draft.save()
-
         # 3. 视频封面
-        elif 'note_video' in files:
+        if 'note_video' in files:
             vid = files['note_video']
             draft.note_video.save(vid.name, vid, save=False)
             draft.save()
 
-            tmp = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
+            # 1) 生成临时文件路径，不保持打开句柄
+            tmp_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
+            tmp_path = tmp_file.name
+            tmp_file.close()
+
+            # 2) FFmpeg 抽帧到临时路径
             cmd = [
                 settings.FFMPEG_PATH,
                 '-i', draft.note_video.path,
                 '-ss', '00:00:01',
-                '-vframes', '1',
-                '-y', tmp.name
+                '-frames:v', '1',
+                '-update', '1',
+                '-y', tmp_path
             ]
             try:
-                subprocess.run(cmd, check=True)
-                dest = f'draft_covers/{uuid.uuid4().hex}.jpg'
-                os.makedirs(os.path.join(settings.MEDIA_ROOT, 'draft_covers'), exist_ok=True)
-                os.replace(tmp.name, os.path.join(settings.MEDIA_ROOT, dest))
+                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                # 3) 构建目标路径，基于 draft.id 创建子文件夹
+                dest_rel = f'draft_covers/{draft.id}/{uuid.uuid4().hex}.jpg'
+                full_dest = os.path.join(settings.MEDIA_ROOT, dest_rel)
+                os.makedirs(os.path.dirname(full_dest), exist_ok=True)
+
+                # 4) 使用 shutil.move（支持跨盘符）
+                shutil.move(tmp_path, full_dest)
+
+                # 5) 更新 DraftNote 实例
                 draft.uploaded_cover_type = 'video'
-                draft.uploaded_cover_path = dest
+                draft.uploaded_cover_path = dest_rel
                 draft.save()
             except Exception as e:
+                # 6) 如果失败，尝试清理临时文件
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
                 raise ValidationError(f"视频封面提取失败: {e}")
-            finally:
-                if os.path.exists(tmp.name):
-                    os.remove(tmp.name)
+
+        # 5. 草稿笔记文件（最多3个）
+        draft.draft_files.all().delete()
+        for f in files.getlist('note_files'):
+            NoteFile.objects.create(draft_note=draft, file=f)
 
         # 4. 文本生成候选封面
-        covers = generate_cover_images(extract_keywords({
-            'title': draft.title,
-            'content': draft.content,
-            'body': draft.body,
-            'category': draft.category
-        }))
+        covers = generate_cover_images(
+            extract_keywords({
+                'title': draft.title,
+                'content': draft.content,
+                'body': draft.body,
+                'category': draft.category
+            }),
+            draft.id
+        )
         draft.generated_covers = covers
         draft.save()
 
@@ -240,21 +284,20 @@ class PublishedNoteViewSet(viewsets.ModelViewSet):
             if draft.cover_image:
                 new_path = move_file(
                     draft.cover_image.path,
-                    os.path.join(settings.MEDIA_ROOT, 'covers', str(note.id))
+                    os.path.join(settings.MEDIA_ROOT, 'note_covers', str(note.id))
                 )
-                note.cover_image.name = f'covers/{note.id}/{os.path.basename(new_path)}'
+                note.cover_image.name = f'note_covers/{note.id}/{os.path.basename(new_path)}'
 
-            # 可选：搬迁草稿中的文件附件（若 DraftNote 定义了 file_attachments）
-            if hasattr(draft, 'file_attachments'):
-                for file in draft.file_attachments.all()[:3]:
-                    new_path = move_file(
-                        file.file.path,
-                        os.path.join(settings.MEDIA_ROOT, 'note_files', str(note.id))
-                    )
-                    nf = NoteFile.objects.create(
-                        file=f'note_files/{note.id}/{os.path.basename(new_path)}'
-                    )
-                    note.file_attachments.add(nf)
+            # 搬迁草稿中的文件附件
+            for file in draft.draft_files.all():
+                new_path = move_file(
+                    file.file.path,
+                    os.path.join(settings.MEDIA_ROOT, 'note_files', str(note.id))
+                )
+                nf = NoteFile.objects.create(
+                    published_note=note,
+                    file=f'note_files/{note.id}/{os.path.basename(new_path)}'
+                )
 
             note.save()
 
