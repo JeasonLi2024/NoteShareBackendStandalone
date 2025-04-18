@@ -40,8 +40,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         # 检查消息发送限制
         if not await self.can_send_message(self.user, self.conversation_id):
-            error_resp = {"error": "发送消息数量已达到上限，请等待对方回复"}
-            await self.send(text_data=json.dumps(error_resp, ensure_ascii=False))
+            await self.send(text_data=json.dumps({
+                "type": "error",
+                "code": 403,
+                "detail": "发送消息数量已达到上限，请等待对方回复"
+            }, ensure_ascii=False))
             return
 
         # 保存消息
@@ -66,6 +69,23 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def chat_message(self, event):
         await self.send(text_data=event['text'])
+
+    async def message_retract(self, event):
+        """
+        收到撤回广播后，根据是否为撤回者，发送不同的提示。
+        """
+        retractor_id = event['retractor_id']
+        message_id = event['message_id']
+        if self.user.id == retractor_id:
+            tip = "你撤回了一条消息"
+        else:
+            tip = "对方撤回了一条消息"
+
+        await self.send(text_data=json.dumps({
+            'type': 'message_retract',
+            'message_id': message_id,
+            'tip': tip
+        }, ensure_ascii=False))
 
     @database_sync_to_async
     def get_conversation(self, conversation_id):
@@ -111,7 +131,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
         if not messages:
             return True
 
-        # 由于明确了角色，可直接判断：
         # 如果当前用户为 visitor 且作者还未回复，则限制为10，否则为20
         if conversation.visitor == user and not any(msg.sender == conversation.author for msg in messages):
             limit = 10

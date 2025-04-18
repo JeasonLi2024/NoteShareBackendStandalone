@@ -2,6 +2,10 @@ import os
 import subprocess
 from tempfile import NamedTemporaryFile
 from django.core.files import File
+from datetime import timedelta
+from django.utils import timezone
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework import generics, filters, status
@@ -24,6 +28,9 @@ class ConversationMessagesView(generics.ListAPIView):
     filter_backends = [filters.SearchFilter]
     search_fields = ['content', 'message_type']
 
+    def get_conversation(self):
+        return Conversation.objects.filter(id=self.kwargs.get('conversation_id')).first()
+
     def get_queryset(self):
         conversation_id = self.kwargs.get('conversation_id')
         # 验证用户是否是该对话的参与者（安全检查，可选）
@@ -36,15 +43,26 @@ class ConversationMessagesView(generics.ListAPIView):
         return Message.objects.none()
 
     def list(self, request, *args, **kwargs):
-        """
-        可选：自定义返回结构，包含对话ID以及消息记录
-        """
-        queryset = self.get_queryset()
-        serializer = self.get_serializer(queryset, many=True)
+        conv = self.get_conversation()
+        if not conv or request.user not in conv.participants.all():
+            return Response({
+                "conversation_id": self.kwargs.get('conversation_id'),
+                "messages": []
+            }, status=status.HTTP_200_OK)
+
+        # —— 在这里把所有该对话里、发送者不是当前用户、且 is_read=False 的消息标为已读 ——
+        Message.objects.filter(
+            conversation=conv,
+            is_read=False
+        ).exclude(sender=request.user).update(is_read=True)
+
+        qs = self.get_queryset()
+        serializer = self.get_serializer(qs, many=True)
         return Response({
-            "conversation_id": self.kwargs.get('conversation_id'),
+            "conversation_id": conv.id,
             "messages": serializer.data,
-        })
+        }, status=status.HTTP_200_OK)
+
 
 
 # 展示当前用户所有私信对话列表，每个对话可以包含最后一条消息预览等信息
@@ -71,58 +89,81 @@ class UserConversationsView(generics.ListAPIView):
         }, status=status.HTTP_200_OK)
 
 
-# 单个聊天信息删除接口，仅允许发送者删除自己的消息。
 class MessageDeleteView(generics.DestroyAPIView):
     queryset = Message.objects.all()
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, *args, **kwargs):
         message = self.get_object()
-        # 仅允许发送者删除消息
+
         if request.user != message.sender:
-            return Response({'detail': '没有删除该消息的权限'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'detail': '没有撤回该消息的权限'}, status=status.HTTP_403_FORBIDDEN)
+
+        now = timezone.now()
+        if now - message.timestamp > timedelta(minutes=5):
+            return Response({'detail': '撤回时间已过，不能撤回'}, status=status.HTTP_403_FORBIDDEN)
+
+        # 先拿到要广播的信息
+        message_id = message.id
+        conversation_id = message.conversation.id
+        retractor_id = request.user.id
+
+        # 真正删除
         self.perform_destroy(message)
-        return Response({'detail': '消息已删除'}, status=status.HTTP_204_NO_CONTENT)
 
-# 批量删除聊天消息接口
-class MessageBulkDeleteView(APIView):
-    """
-    前端需要传递一个 JSON 参数：
-    {
-        "ids": [1, 2, 3, ...]
-    }
-    """
-    permission_classes = [IsAuthenticated]
+        # 广播给会话组，让双方客户端收到提示
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"chat_{conversation_id}",
+            {
+                'type': 'message_retract',      # 对应 ChatConsumer.message_retract
+                'message_id': message_id,
+                'retractor_id': retractor_id,
+            }
+        )
 
-    def post(self, request, *args, **kwargs):
-        message_ids = request.data.get('ids', [])
-        if not message_ids:
-            return Response({'detail': '消息ID列表不能为空'}, status=status.HTTP_400_BAD_REQUEST)
+        # 并且 HTTP 端也给撤回者提示
+        return Response({'detail': '你撤回了一条消息'}, status=status.HTTP_200_OK)
 
-        # 仅删除属于当前用户的消息
-        messages = Message.objects.filter(id__in=message_ids, sender=request.user)
-        if not messages.exists():
-            return Response({'detail': '未找到相应消息或无权限删除'}, status=status.HTTP_404_NOT_FOUND)
-        count = messages.count()
-        messages.delete()
-        return Response({'detail': f'{count} 条消息已删除'}, status=status.HTTP_200_OK)
-
-
-# 删除某个聊天室（对话）内的所有消息。
-class ConversationMessagesDeleteView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def delete(self, request, conversation_id, *args, **kwargs):
-        try:
-            conversation = Conversation.objects.get(id=conversation_id)
-        except Conversation.DoesNotExist:
-            return Response({'detail': '对话不存在'}, status=status.HTTP_404_NOT_FOUND)
-
-        if request.user not in conversation.participants.all():
-            return Response({'detail': '无访问该对话的权限'}, status=status.HTTP_403_FORBIDDEN)
-
-        count, _ = conversation.messages.all().delete()
-        return Response({'detail': f'{count} 条消息已删除'}, status=status.HTTP_200_OK)
+# # 批量删除聊天消息接口
+# class MessageBulkDeleteView(APIView):
+#     """
+#     前端需要传递一个 JSON 参数：
+#     {
+#         "ids": [1, 2, 3, ...]
+#     }
+#     """
+#     permission_classes = [IsAuthenticated]
+#
+#     def post(self, request, *args, **kwargs):
+#         message_ids = request.data.get('ids', [])
+#         if not message_ids:
+#             return Response({'detail': '消息ID列表不能为空'}, status=status.HTTP_400_BAD_REQUEST)
+#
+#         # 仅删除属于当前用户的消息
+#         messages = Message.objects.filter(id__in=message_ids, sender=request.user)
+#         if not messages.exists():
+#             return Response({'detail': '未找到相应消息或无权限删除'}, status=status.HTTP_404_NOT_FOUND)
+#         count = messages.count()
+#         messages.delete()
+#         return Response({'detail': f'{count} 条消息已删除'}, status=status.HTTP_200_OK)
+#
+#
+# # 删除某个聊天室（对话）内的所有消息。
+# class ConversationMessagesDeleteView(APIView):
+#     permission_classes = [IsAuthenticated]
+#
+#     def delete(self, request, conversation_id, *args, **kwargs):
+#         try:
+#             conversation = Conversation.objects.get(id=conversation_id)
+#         except Conversation.DoesNotExist:
+#             return Response({'detail': '对话不存在'}, status=status.HTTP_404_NOT_FOUND)
+#
+#         if request.user not in conversation.participants.all():
+#             return Response({'detail': '无访问该对话的权限'}, status=status.HTTP_403_FORBIDDEN)
+#
+#         count, _ = conversation.messages.all().delete()
+#         return Response({'detail': f'{count} 条消息已删除'}, status=status.HTTP_200_OK)
 
 
 # 允许作者对某个对话拉黑或取消拉黑访客
