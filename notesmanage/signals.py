@@ -36,7 +36,10 @@ def handle_like_change(sender, instance, **kwargs):
     delta = 1 if kwargs.get('created', False) else -1
     Note.objects.filter(id=note.id).update(likes_count=F('likes_count') + delta)
     # 更新作者的总获赞数（确保不为负）
-    note.author.total_likes = F('total_likes') + delta
+    if delta == -1 and note.author.total_likes ==0:
+        note.author.total_likes = 0
+    else:
+        note.author.total_likes = F('total_likes') + delta
     note.author.save()
     update_note_popularity(note.id)
 

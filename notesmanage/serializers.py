@@ -6,6 +6,8 @@ from .models import Note, Comment, Like, Favorite, NoteImage, DraftNote, NoteFil
 from django.contrib.auth import get_user_model
 import pytz
 
+from .utils import get_share_link
+
 User = get_user_model()
 
 
@@ -157,6 +159,7 @@ class NoteSerializer(serializers.ModelSerializer):
     # comments = CommentSerializer(many=True, read_only=True)
     note_images = NoteImageSerializer(many=True, read_only=True, source='published_images')
     note_files = NoteFileSerializer(many=True, read_only=True, source='published_files')
+    share_link = serializers.SerializerMethodField()
 
     class Meta:
         model = Note
@@ -179,6 +182,10 @@ class NoteSerializer(serializers.ModelSerializer):
         if len(value) < 10:
             raise serializers.ValidationError("内容至少需要10个字符")
         return value
+
+    def get_share_link(self, obj):
+        request = self.context.get('request')
+        return get_share_link(request, obj.id)
 
     # def get_image_urls(self, obj):
     #     return [img.image.url for img in obj.images.all()]

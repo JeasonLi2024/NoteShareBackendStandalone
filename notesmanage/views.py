@@ -485,13 +485,11 @@ class NoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
             instance.author.total_views += 1
             instance.author.save()
         serializer = self.get_serializer(instance, context={'request': request})
-        share_link = get_share_link(request, instance.id)  # 生成分享链接
 
         return Response({
             "code": status.HTTP_200_OK,
             "message": "Note retrieved successfully",
             "data": serializer.data,
-            "share_link": share_link
         }, status=status.HTTP_200_OK)
 
     #update方法处理 PUT 和 PATCH 请求，更新笔记内容，并返回成功消息和更新后的数据

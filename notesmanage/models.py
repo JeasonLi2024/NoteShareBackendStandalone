@@ -108,7 +108,7 @@ class Note(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
     author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='published_notes', verbose_name='作者')
-    likes = models.ManyToManyField(User, through='Like', related_name='liked_published_notes', verbose_name='点赞')
+    likes = models.ManyToManyField(User, through='Like', related_name='liked_notes', verbose_name='点赞')
     views_count = models.PositiveIntegerField(default=0, verbose_name='浏览次数')
     likes_count = models.PositiveIntegerField(default=0, verbose_name='点赞数')
     comments_count = models.PositiveIntegerField(default=0, verbose_name='评论数')
