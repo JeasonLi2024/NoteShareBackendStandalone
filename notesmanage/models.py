@@ -37,7 +37,6 @@ def draft_file_upload_path(instance, filename):
     return f'draft_files/{instance.id}/{filename}'
 
 
-
 # 自定义获取笔记liked_time方式
 class NoteQuerySet(models.QuerySet):
     def annotate_liked_time(self, user):
@@ -64,6 +63,7 @@ def get_note_file_path(instance, filename):
         return f'draft_files/{instance.draft_note.id}/{uuid.uuid4().hex}{ext}'
     return f'published_files/{instance.published_note.id}/{uuid.uuid4().hex}{ext}'
 
+# 草稿笔记
 class DraftNote(models.Model):
     title = models.CharField(max_length=20, verbose_name='标题')
     content = models.CharField(max_length=200, verbose_name='内容概括')
@@ -118,6 +118,7 @@ class Note(models.Model):
     note_video = models.FileField(upload_to=note_video_upload_path, blank=True, null=True, verbose_name='视频')
     body = CKEditor5Field('正文内容', config_name='extends')
     popularity = models.FloatField(default=0.0, verbose_name='热度')
+    is_top_quality = models.BooleanField(default=False, verbose_name='优质笔记')
 
     objects = NoteQuerySet.as_manager()  # 复用原有管理器
     tracker = FieldTracker(fields=['views_count', 'likes_count', 'comments_count'])
@@ -147,7 +148,7 @@ class Note(models.Model):
     def __str__(self):
         return self.title
 
-
+# 笔记图片
 class NoteImage(models.Model):
     image = models.ImageField(upload_to=draft_image_upload_path)
 
@@ -167,6 +168,7 @@ class NoteImage(models.Model):
     def __str__(self):
         return f"Image for draft={self.draft_note_id} pub={self.published_note_id}"
 
+# 笔记文件
 class NoteFile(models.Model):
     file = models.FileField(upload_to=draft_file_upload_path)
 
@@ -285,7 +287,7 @@ class TopNote(models.Model):
     def __str__(self):
         return f"Top Note: {self.note.title} - Popularity: {self.popularity}"
 
-
+# 评论
 class Comment(models.Model):
     note = models.ForeignKey(Note, on_delete=models.CASCADE, related_name='comments', verbose_name='笔记')
     user = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='用户')

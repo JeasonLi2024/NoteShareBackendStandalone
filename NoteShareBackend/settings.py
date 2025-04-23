@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 from datetime import timedelta
 
+from celery.schedules import crontab
 # 读取.env环境变量
 from dotenv import load_dotenv
 from celery import Celery
@@ -413,7 +414,11 @@ CELERY_BEAT_SCHEDULE = {
     },
     'refresh-comments-every-5-min': {
         'task': 'notesmanage.tasks.refresh_comments_order',
-        'schedule': 30,  # 每5分钟执行一次
+        'schedule': 600,  # 每5分钟执行一次
+    },
+    'reset_daily_counters': {
+        'task': 'user.tasks.reset_daily_counters',
+        'schedule': crontab(hour=0, minute=0),
     },
 }
 

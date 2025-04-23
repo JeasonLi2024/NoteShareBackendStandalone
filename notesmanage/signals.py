@@ -3,8 +3,11 @@ from django.db.models.signals import post_save, post_delete, m2m_changed
 from django.dispatch import receiver
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from .models import Note, Like, Comment, Favorite, DraftNote
+
+from user.models import PointHistory
+from .models import Note, Like, Comment, Favorite, DraftNote, TopNote
 from django.contrib.auth import get_user_model
+from django.db import transaction
 import os
 import glob
 from django.conf import settings
@@ -51,6 +54,30 @@ def handle_comment_change(sender, instance, **kwargs):
     delta = 1 if kwargs.get('created', False) else -1
     Note.objects.filter(id=note.id).update(comments_count=F('comments_count') + delta)
     update_note_popularity(note.id)
+
+@receiver(post_save, sender=TopNote)
+def reward_on_top_quality(sender, instance, created, **kwargs):
+    """
+    当 TopNote 新增或更新时，如果排名进入前 10 并且笔记未标记过优质，则标记并奖励。
+    """
+    note = instance.note
+    # 只处理进入 Top10 的情况
+    if instance.rank <= 10 and not note.is_top_quality:
+        with transaction.atomic():
+            # 标记 Note 为优质笔记
+            Note.objects.filter(pk=note.pk).update(is_top_quality=True)
+            # 锁定作者并奖励积分
+            author = User.objects.select_for_update().get(pk=note.author_id)
+            author.points = F('points') + 100
+            author.save(update_fields=['points'])
+            author.refresh_from_db()
+            # 记录积分变动
+            PointHistory.objects.create(
+                user=author,
+                amount=100,
+                source='top_quality',
+                description=f'笔记《{note.title}》成为 Top10 优质笔记，奖励 100 分'
+            )
 
 def push_notification(user, notification):
     """

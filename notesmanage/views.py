@@ -1,12 +1,10 @@
-import os, shutil
+import os, shutil, json, requests
 import tempfile
 import subprocess
 from django.conf import settings
-from django.core.files import File
-import jieba
-import jieba.analyse
 import uuid
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
+from user.models import PointHistory
 from .utils import extract_keywords, generate_cover_images, compress_image
 from django.db import transaction
 from rest_framework.exceptions import ValidationError, PermissionDenied
@@ -24,17 +22,15 @@ from .serializers import(
     NoteFavoriteSerializer, UserSerializer, DraftNoteSerializer
 )
 from django.db.models import Prefetch
-from .utils import UnixTimestamp, get_share_link
+from .utils import UnixTimestamp
 from django.http import HttpResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
 from django.db.models import Count, F, ExpressionWrapper, IntegerField, FloatField, Case, When, Value, Q
 from .permissions import IsOwnerOrReadOnly
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAuthenticatedOrReadOnly, IsAdminUser
-import fitz  # PyMuPDF
-import docx
-import markdown
 from io import BytesIO
+from .ai_conclude import SparkLiteClient
 
 
 User = get_user_model()
@@ -213,26 +209,6 @@ class DraftNoteViewSet(viewsets.ModelViewSet):
         return Response({'msg': '封面更新成功'})
 
 
-# 新建笔记，没有在后端可视化验证，可能需要在前端验证，前端可能需要配置CKEDITOR_5
-# class NoteCreateView(generics.ListCreateAPIView):
-#     queryset = Note.objects.all()
-#     serializer_class = NoteSerializer
-#     # permission_classes = [IsAuthenticated]
-#     permission_classes = [AllowAny]
-#     def perform_create(self, serializer):
-#         serializer.save(author=self.request.user)
-#
-#     def create(self, request, *args, **kwargs):
-#         serializer = self.get_serializer(data=request.data)
-#         serializer.is_valid(raise_exception=True)
-#         self.perform_create(serializer)
-#         headers = self.get_success_headers(serializer.data)
-#         return Response({
-#             "code": status.HTTP_201_CREATED,
-#             "message": "Note created successfully",
-#             "data": serializer.data
-#         }, status=status.HTTP_201_CREATED, headers=headers)
-
 class PublishedNoteViewSet(viewsets.ModelViewSet):
     queryset = Note.objects.all()
     serializer_class = NoteSerializer
@@ -298,14 +274,41 @@ class PublishedNoteViewSet(viewsets.ModelViewSet):
                     published_note=note,
                     file=f'note_files/{note.id}/{os.path.basename(new_path)}'
                 )
+            # 更新用户笔记总数
+            User.objects.filter(pk=note.author_id).update(total_notes=F('total_notes') + 1)
+            user = User.objects.select_for_update().get(pk=request.user.pk)
+
+            # 积分逻辑
+            is_first = (user.total_notes == 1)
+            add_points = 0
+            source = None
+
+            if is_first and not user.first_publish_bonus_given:
+                add_points = 50
+                source = 'first_publish'
+                user.first_publish_bonus_given = True
+            else:
+                # 日常发布，每日最多 30 分，每篇最多 10 分
+                if user.points_note_publish < 30:
+                    add_points = min(10, 30 - user.points_note_publish)
+                    source = 'daily_publish'
+                    user.points_note_publish += add_points
+
+            if add_points > 0:
+                user.points = F('points') + add_points
+                PointHistory.objects.create(
+                    user=user,
+                    amount=add_points,
+                    source=source,
+                    description=f"{'首发奖励' if source == 'first_publish' else '发布笔记'} 获得 {add_points} 分"
+                )
 
             note.save()
-
+            user.save(update_fields=['points', 'points_note_publish', 'first_publish_bonus_given'])
             # 验证序列化
             serialized = NoteSerializer(note, context={'request': request}).data
             # 删除草稿
             draft.delete()
-
         return Response(serialized, status=status.HTTP_201_CREATED)
 
 
@@ -328,17 +331,6 @@ class CoverThumbnailView(APIView):
                 return HttpResponse(buffer.getvalue(), content_type="image/jpeg")
         except Exception as e:
             return HttpResponse(str(e), status=500)
-
-
-# 使用表单经过验证，但网页十分简洁，详见templates目录下的create_note.html（该目录下的另一个文件夹中的.html暂时没有使用）
-# def create_note(request):
-#     if request.method == 'POST':
-#         form = CommentForm(data=request.POST)
-#         if form.is_valid():
-#             form.save()
-#             return render(request, 'form-post-finished.html') # 这个地方的逻辑时提交成功后跳转到一个名为form-post-finished.html的页面，我没有在后端设置，这个相关路由只是为了在后端可视化测试CKEDITOR_5是否可用
-#     form = CommentForm()
-#     return render(request, 'create_note.html', {'form': form})
 
 
 # 定义了一些预览上传的笔记文件的方法，已验证 （PDF文件有的可以预览内容有的不行）
@@ -508,7 +500,11 @@ class NoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     #destroy方法处理DELETE请求，删除笔记，并返回成功消息
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        instance.delete()
+        author_id = instance.author_id
+        with transaction.atomic():  # 添加事务保障原子性
+            # 减少用户笔记总数
+            User.objects.filter(pk=author_id).update(total_notes=F('total_notes') - 1)
+            instance.delete()
         return Response({
             "code": status.HTTP_204_NO_CONTENT,
             "message": "Note deleted successfully"
@@ -839,3 +835,42 @@ class FollowersListView(generics.ListAPIView):
     def get_queryset(self):
         # 获取当前登录用户的所有粉丝
         return self.request.user.followers.all()
+
+
+# AI笔记总结
+class NoteSummarizeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        note_id = request.data.get('note_id')
+        if not note_id:
+            return Response({'error': '需要提供 note_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        note = get_object_or_404(Note, pk=note_id, author=request.user)
+
+        # 使用事务和 select_for_update 锁定用户记录
+        with transaction.atomic():
+            user = User.objects.select_for_update().get(pk=request.user.pk)
+            if user.ai_limits <= 0:
+                return Response({'error': 'AI 使用次数已用尽'}, status=status.HTTP_403_FORBIDDEN)
+
+            prompt = f"请为以下笔记内容生成简要总结：\n\n{note.content}"
+            try:
+                summary = SparkLiteClient.summarize(prompt)
+            except requests.exceptions.RequestException as e:
+                return Response({'error': f'调用 AI 接口失败：{str(e)}'},
+                                status=status.HTTP_502_BAD_GATEWAY)
+            except (KeyError, ValueError, json.JSONDecodeError) as e:
+                return Response({'error': f'AI 返回数据异常：{str(e)}'},
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # 扣减 AI 使用次数并记录历史
+            user.ai_limits -= 1
+            user.save(update_fields=['ai_limits'])
+
+        # 事务结束后返回结果
+        return Response({
+            'success': True,
+            'summary': summary,
+            'ai_limits': user.ai_limits
+        }, status=status.HTTP_200_OK)

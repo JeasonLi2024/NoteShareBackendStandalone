@@ -43,7 +43,7 @@ urlpatterns = [
 
     path("admin/", admin.site.urls),
     path("ckeditor5/", include('django_ckeditor_5.urls')),
-    path('user/', include('user.urls')),
+    path('users/', include('user.urls')),
     path('notesmanage/', include('notesmanage.urls')),
     path('notifications/', include('notifications.urls')),
     path('chat/', include('chat.urls')),

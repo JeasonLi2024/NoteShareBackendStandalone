@@ -1,8 +1,12 @@
 from rest_framework import viewsets
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework import status, generics
 from rest_framework.generics import RetrieveUpdateAPIView
-from .serializers import UserSerializer, UserCreateSerializer, LoginSerializer
+from django.db import transaction
+from .models import Goods, PointHistory
+from django.db.models import F
+from .serializers import UserSerializer, UserCreateSerializer, LoginSerializer, PointHistorySerializer, GoodsSerializer
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -154,7 +158,7 @@ class LoginView(APIView):
 class UserUpdateView(RetrieveUpdateAPIView):
     queryset = get_user_model().objects.all()
     serializer_class = UserSerializer
-    permission_classes = [IsAuthenticated]  # 修正为需要认证
+    permission_classes = [IsAuthenticated]
 
     def get_object(self):
         return self.request.user
@@ -259,4 +263,95 @@ class UserViewSet(viewsets.ModelViewSet):
             "data": {}
         }, status=status.HTTP_204_NO_CONTENT)
 
+# 自定义分页处理
+class TenPerPagePagination(PageNumberPagination):
+    """每页只展示 10 条记录，前端可选通过 page_size 参数调整，但不超过最大值。"""
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
+# 积分明细
+class PointHistoryView(generics.ListAPIView):
+    """积分明细视图：每页展示 10 条，返回用户总积分以及分页后的明细列表。"""
+    serializer_class = PointHistorySerializer
+    pagination_class = TenPerPagePagination
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = self.request.user.point_histories.all()
+
+        # 按时间范围筛选
+        start = self.request.query_params.get('start_date')
+        end = self.request.query_params.get('end_date')
+        if start:
+            qs = qs.filter(created_at__gte=timezone.datetime.fromisoformat(start))
+        if end:
+            qs = qs.filter(created_at__lte=timezone.datetime.fromisoformat(end))
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        # 分页并序列化
+        page = self.paginate_queryset(self.get_queryset())
+        serializer = self.get_serializer(page, many=True)
+        paginated = self.get_paginated_response(serializer.data).data
+        # 改名 results -> histories 并加入 total_points
+        paginated['histories'] = paginated.pop('results')
+        paginated['total_points'] = request.user.points
+        return Response(paginated, status=status.HTTP_200_OK)
+
+
+# 积分商城
+class RedemptionView(APIView):
+    """积分兑换视图：支持 GET（查询可兑换商品及积分），POST（兑换商品）。"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        goods_qs = Goods.objects.filter(is_active=True)
+        serializer = GoodsSerializer(goods_qs, many=True, context={'request': request})
+        return Response({
+            'points': user.points,
+            'goods': serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        goods_id = request.data.get('goods_id')
+        try:
+            quantity = int(request.data.get('quantity', 1))
+        except (TypeError, ValueError):
+            return Response({'error': 'quantity 必须是正整数'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not goods_id:
+            return Response({'error': '需要提供 goods_id'}, status=status.HTTP_400_BAD_REQUEST)
+        if quantity < 1:
+            return Response({'error': 'quantity 必须是正整数'}, status=status.HTTP_400_BAD_REQUEST)
+
+        goods = get_object_or_404(Goods, pk=goods_id, is_active=True)
+        total_cost = goods.price * quantity
+
+        # 把整个用户读锁和更新放在同一个事务里
+        with transaction.atomic():
+            user = User.objects.select_for_update().get(pk=request.user.pk)
+            if user.points < total_cost:
+                return Response({'error': '您的积分不足无法兑换'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 扣积分、加 ai_limits
+            user.points = F('points') - total_cost
+            user.ai_limits = F('ai_limits') + quantity
+            user.save(update_fields=['points', 'ai_limits'])
+            # 刷新数据库里的真实值
+            user.refresh_from_db()
+
+            # 记录兑换历史
+            PointHistory.objects.create(
+                user=user,
+                amount=-total_cost,
+                source='redeem',
+                description=f'兑换{goods.name} x{quantity}'
+            )
+
+        return Response({
+            'message': f'已成功兑换{goods.name} x{quantity}',
+            'points': user.points,
+            'ai_limits': user.ai_limits
+        }, status=status.HTTP_200_OK)

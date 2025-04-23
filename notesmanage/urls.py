@@ -2,14 +2,13 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path, include
 from notesmanage.views import (
-    UserNotesView,  NoteRetrieveUpdateDestroyView,
-    NoteLikeView,  NoteSearchView, CommentDestroyView, CommentLikeView,
-    TopNotesView,  NoteListView, NotesByCategoryView,
+    UserNotesView, NoteRetrieveUpdateDestroyView,
+    NoteLikeView, NoteSearchView, CommentDestroyView, CommentLikeView,
+    TopNotesView, NoteListView, NotesByCategoryView,
     UserLikedNotesView, CommentListCreateView, CommentDislikeView, SubCommentListView,
     UserFavoriteNotesView, NoteFavoriteView, FollowToggleView, FollowedUsersListView,
-    FollowersListView, CoverThumbnailView
+    FollowersListView, CoverThumbnailView, NoteSummarizeView
 )
-from .ai_conclude import spark_lite
 from rest_framework.routers import DefaultRouter
 from .views import DraftNoteViewSet, PublishedNoteViewSet
 
@@ -73,7 +72,7 @@ urlpatterns = [
                   # 笔记预览
                   # path('notes/<int:note_id>/preview/', preview_note, name='note-preview'),
                   # AI笔记总结
-                  path('notes/ai_conclude/', spark_lite, name='note-ai_conclude'),
+                  path('notes/ai_conclude/', NoteSummarizeView.as_view(), name='note-ai_conclude'),
                   path('', include(router.urls)),
 
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

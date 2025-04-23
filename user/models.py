@@ -41,10 +41,23 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
 
+    points = models.PositiveIntegerField(default=0, verbose_name='总积分')
+    # 当日通过发布笔记获得的积分（每日上限 30，不含首发笔记）
+    points_note_publish = models.PositiveSmallIntegerField(default=0, verbose_name='当日发布积分')
+    first_publish_bonus_given = models.BooleanField(default=False, verbose_name='是否已领取首发奖励')
+    # 当日通过“点赞”获得的积分（每日上限 10）
+    points_like = models.PositiveSmallIntegerField(default=0, verbose_name='当日点赞积分')
+    # 当日通过“评论”获得的积分（每日上限 20）
+    points_comment = models.PositiveSmallIntegerField(default=0, verbose_name='当日评论积分')
+    # AI 功能可用次数
+    ai_limits = models.PositiveIntegerField(default=100, verbose_name='可用AI次数')
+
     # 获赞数：所有自己笔记的点赞数之和，初始为0
     total_likes = models.PositiveIntegerField(default=0, verbose_name='获赞数')
     # 总浏览量：所有自己笔记的浏览次数之和，初始为0
     total_views = models.PositiveIntegerField(default=0, verbose_name='总浏览')
+    # 总发布笔记数
+    total_notes = models.PositiveIntegerField(default=0, verbose_name='发布笔记数')
     # 关注功能：用户关注其他用户（非对称关系，关注的用户属于 following，而粉丝则由反向关系 followers 得到）
     following = models.ManyToManyField(
         'self',
@@ -87,6 +100,62 @@ class User(AbstractBaseUser, PermissionsMixin):
         db_table = 'user'
         verbose_name = '用户'
         verbose_name_plural = '用户'
+        constraints = [
+            models.CheckConstraint(check=models.Q(points_note_publish__lte=30), name="daily_publish_points_limit"),
+            models.CheckConstraint(check=models.Q(points_like__lte=10), name="daily_like_points_limit"),
+            models.CheckConstraint(check=models.Q(points_comment__lte=20), name="daily_comment_points_limit"),
+        ]
 
     def __str__(self):
         return self.username
+
+
+# 积分明细
+class PointHistory(models.Model):
+    SOURCE_CHOICES = [
+        ('first_publish', '首次发布笔记'),
+        ('daily_publish', '日常发布笔记'),
+        ('note_like', '笔记点赞获得'),
+        ('note_comment', '笔记评论获得'),
+        ('undo','用户撤销操作'),
+        ('top_quality', '优质笔记奖励'),
+        ('redeem', '积分兑换'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='point_histories')
+    amount = models.IntegerField(verbose_name='变动量')
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES)
+    description = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['created_at']),
+            models.Index(fields=['source']),
+        ]
+
+
+def goods_image_upload_path(instance, filename):
+    folder = instance.pk or 'temp'
+    return f'goods_images/{folder}/{filename}'
+
+# 商品模型
+class Goods(models.Model):
+    """可兑换商品模型"""
+    name = models.CharField(max_length=100, verbose_name='商品名称')
+    info = models.TextField(verbose_name='商品简介')
+    image = models.ImageField(upload_to=goods_image_upload_path, verbose_name='商品封面图')
+    price = models.PositiveIntegerField(verbose_name='商品价格（积分）')
+    is_active = models.BooleanField(default=True, verbose_name='是否上架')
+
+    class Meta:
+        db_table = 'goods'
+        verbose_name = '积分商城商品'
+        verbose_name_plural = '积分商城商品'
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)

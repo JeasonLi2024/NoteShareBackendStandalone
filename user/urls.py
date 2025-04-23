@@ -1,12 +1,12 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import UserViewSet
+from .views import UserViewSet, PointHistoryView, RedemptionView
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 from rest_framework.permissions import AllowAny
 
 router = DefaultRouter()
-router.register(r'users', UserViewSet, basename='user')
+router.register(r'user', UserViewSet, basename='user')
 
 schema_view = get_schema_view(
     openapi.Info(
@@ -24,9 +24,13 @@ schema_view = get_schema_view(
 urlpatterns = [
     path('', include(router.urls)),
     # 获取当前用户信息
-    path('users/me/', UserViewSet.as_view({'get': 'me'}), name='user-me'),
+    path('user/me/', UserViewSet.as_view({'get': 'me'}), name='user-me'),
     # 注销当前用户
-    path('users/delete_me/', UserViewSet.as_view({'delete': 'delete_me'}), name='user-delete-me'),
+    path('user/delete_me/', UserViewSet.as_view({'delete': 'delete_me'}), name='user-delete-me'),
+    # 用户积分明细
+    path('point-history/', PointHistoryView.as_view(), name='point-history'),
+    # 积分商城/商品兑换
+    path('redeem/', RedemptionView.as_view(), name='redeem'),
 
     path('docs/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
 ]

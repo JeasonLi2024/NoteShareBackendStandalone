@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.forms import ReadOnlyPasswordHashField
 from django import forms
-from .models import User
+from .models import User, PointHistory, Goods
 from django.core.mail import send_mail
 from django.conf import settings
 from django.utils.html import format_html
@@ -46,11 +46,6 @@ class UserChangeForm(forms.ModelForm):
         model = User
         fields = ('username', 'phone', 'email', 'school', 'major', 'grade', 'is_active', 'is_staff', 'is_superuser')
 
-    # def clean_password(self):
-    #     # 无论用户提供什么值，都返回初始值
-    #     # 这里这样做是因为字段无法访问初始值
-    #     return self.initial["password"]
-
 
 # 自定义 UserAdmin 类
 @admin.register(User)
@@ -60,7 +55,9 @@ class CustomUserAdmin(admin.ModelAdmin):
     add_form = UserCreationForm
 
     # 列表页显示的字段
-    list_display = ['id', 'username', 'phone', 'email', 'last_login', 'school', 'major','total_views','total_likes', 'following_count', 'followers_count', 'reset_password']
+    list_display = ['id', 'username', 'phone', 'email', 'last_login', 'total_notes',
+                    'total_views','total_likes', 'following_count', 'followers_count', 'points',
+                    'ai_limits', 'reset_password']
 
     # 可跳转的字段
     list_display_links = ['id', 'username']
@@ -78,7 +75,7 @@ class CustomUserAdmin(admin.ModelAdmin):
     list_filter = ['username']
 
     # 详情页字段
-    fields = ['username', 'phone', 'email', 'school', 'major', 'grade', 'is_active', 'is_staff', 'is_superuser']
+    fields = ['username', 'phone', 'email', 'school', 'major', 'grade', 'total_notes', 'points', 'is_active', 'is_staff', 'is_superuser']
 
     # 添加自定义操作：重置密码
     def reset_password(self, obj):
@@ -161,4 +158,12 @@ class CustomUserAdmin(admin.ModelAdmin):
             'fields': ('username', 'phone', 'email', 'password1', 'password2'),
         }),
     )
+
+
+@admin.register(Goods)
+class GoodsAdmin(admin.ModelAdmin):
+    list_display = ('id', 'name', 'price', 'is_active')
+    list_editable = ('price', 'is_active')
+    search_fields = ('name',)
+
 

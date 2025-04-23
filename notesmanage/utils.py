@@ -2,6 +2,7 @@ import os
 import uuid
 import random
 import jieba
+import jieba.analyse
 from django.db.models import Func, IntegerField
 from django.urls import reverse
 from io import BytesIO

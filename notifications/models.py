@@ -9,6 +9,7 @@ NOTIFICATION_TYPE_CHOICES = (
     ('comment_like', '评论点赞'),
     ('follow', '关注'),
     ('new_note', '关注作者的新笔记'),
+    ('points_change', '积分变更'),
 )
 
 

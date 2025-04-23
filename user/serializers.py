@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 
+from user.models import PointHistory, Goods
+
 UserModel = get_user_model()
 
 
@@ -13,8 +15,9 @@ class UserSerializer(serializers.ModelSerializer):
         model = UserModel
         fields = (
             'id', 'username', 'email', 'avatar', 'phone', 'created_at', 'last_login',
-            'school', 'major', 'grade', 'introduction', 'total_likes', 'total_views',
-            'following_count', 'followers_count', 'is_following'  # 添加新的字段
+            'school', 'major', 'grade', 'introduction', 'total_notes', 'total_likes',
+            'total_views', 'following_count', 'followers_count', 'is_following', 'ai_limits', 'points',
+            'points_note_publish'
         )
         extra_kwargs = {'password': {'write_only': True}}
         read_only_fields = ('created_at', 'last_login')
@@ -110,3 +113,41 @@ class LoginSerializer(serializers.Serializer):
 
         raise serializers.ValidationError("无法使用提供的信息登录。")
 
+
+class PointHistorySerializer(serializers.ModelSerializer):
+    # 自定义字段显示 source 的可读名称
+    source_display = serializers.SerializerMethodField()
+    # 格式化时间字段
+    created_at = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S", read_only=True)
+    signed_amount = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = PointHistory
+        fields = [
+            'id', 'signed_amount', 'amount', 'source', 'description', 'created_at', 'source_display'
+        ]
+
+        # read_only_fields = fields  # 所有字段均为只读
+
+    def get_source_display(self, obj):
+        """获取 source 字段的可读名称"""
+        return obj.get_source_display()
+
+    def get_signed_amount(self, obj):
+        # 正数前加 "+"，负数直接 str()
+        return f"+{obj.amount}" if obj.amount > 0 else str(obj.amount)
+
+
+class GoodsSerializer(serializers.ModelSerializer):
+    image = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Goods
+        fields = ['id', 'name', 'info', 'image', 'price']
+
+    def get_image(self, obj):
+        request = self.context.get('request')
+        if obj.image and hasattr(obj.image, 'url'):
+            return request.build_absolute_uri(obj.image.url)
+        return None
+     
