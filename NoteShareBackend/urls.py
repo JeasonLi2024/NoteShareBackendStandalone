@@ -19,7 +19,7 @@ from django.contrib import admin
 from django.urls import path,include
 from user.views import (
     UserViewSet, RegisterView, LoginView,
-    UserUpdateView, SendVerificationCodeView
+    UserUpdateView, SendVerificationCodeView, EmailLoginView
 )
 
 from rest_framework.routers import SimpleRouter
@@ -37,6 +37,8 @@ urlpatterns = [
     path('send-code/', SendVerificationCodeView.as_view(), name='send-verification-code'),
     path('register/', RegisterView.as_view(), name='register'),
     path('login/', LoginView.as_view(), name='login'),
+    path('email_login/', EmailLoginView.as_view(), name='emaillogin'),
+    path('user/update/', UserUpdateView.as_view(), name='user-update'),
 
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
@@ -48,8 +50,6 @@ urlpatterns = [
     path('notifications/', include('notifications.urls')),
     path('chat/', include('chat.urls')),
 
-    # 更新功能已经包含头像更新
-    path('user/update/', UserUpdateView.as_view(), name='user-update'),
 
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 

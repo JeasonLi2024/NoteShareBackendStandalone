@@ -3,7 +3,6 @@ import tempfile
 import subprocess
 from django.conf import settings
 import uuid
-from PIL import Image
 from user.models import PointHistory
 from .utils import extract_keywords, generate_cover_images, compress_image
 from django.db import transaction
@@ -23,13 +22,11 @@ from .serializers import(
 )
 from django.db.models import Prefetch
 from .utils import UnixTimestamp
-from django.http import HttpResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
 from django.db.models import Count, F, ExpressionWrapper, IntegerField, FloatField, Case, When, Value, Q
 from .permissions import IsOwnerOrReadOnly
-from rest_framework.permissions import IsAuthenticated, AllowAny, IsAuthenticatedOrReadOnly, IsAdminUser
-from io import BytesIO
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAuthenticatedOrReadOnly
 from .ai_conclude import SparkLiteClient
 
 
@@ -312,63 +309,6 @@ class PublishedNoteViewSet(viewsets.ModelViewSet):
         return Response(serialized, status=status.HTTP_201_CREATED)
 
 
-# 封面缩略图生成
-class CoverThumbnailView(APIView):
-    def get(self, request, note_id, filename):
-        note = get_object_or_404(Note, pk=note_id)
-        original_path = next((p for p in note.generated_covers if filename in p), None)
-
-        if not original_path:
-            return HttpResponse(status=404)
-
-        full_path = os.path.join(settings.MEDIA_ROOT, original_path)
-
-        try:
-            with Image.open(full_path) as img:
-                img.thumbnail((300, 200))
-                buffer = BytesIO()
-                img.save(buffer, format="JPEG", quality=85)
-                return HttpResponse(buffer.getvalue(), content_type="image/jpeg")
-        except Exception as e:
-            return HttpResponse(str(e), status=500)
-
-
-# 定义了一些预览上传的笔记文件的方法，已验证 （PDF文件有的可以预览内容有的不行）
-# def preview_note(request, note_id):
-#     note = get_object_or_404(Note, id=note_id)
-#     file_path = note.file.path if note.file else None
-#
-#     if not file_path:
-#         return HttpResponse("No file attached to this note.")
-#
-#     file_extension = os.path.splitext(file_path)[1].lower()
-#
-#     if file_extension == '.pdf':
-#         # 使用 PyMuPDF 将 PDF 转换为 HTML
-#         with fitz.open(file_path) as doc:
-#             html_content = ""
-#             for page in doc:
-#                 html_content += page.get_text("html")
-#             return HttpResponse(html_content)
-#
-#     elif file_extension in ['.doc', '.docx']:
-#         # 使用 python-docx 将 Word 转换为 HTML
-#         document = docx.Document(file_path)
-#         html_content = ""
-#         for paragraph in document.paragraphs:
-#             html_content += f"<p>{paragraph.text}</p>"
-#         return HttpResponse(html_content)
-#
-#     elif file_extension == '.md':
-#         # 使用 markdown 库将 Markdown 转换为 HTML
-#         with open(file_path, 'r') as f:
-#             markdown_content = f.read()
-#             html_content = markdown.markdown(markdown_content)
-#             return HttpResponse(html_content)
-#     else:
-#         raise Http404("Unsupported file type.")
-
-
 # 异步功能根据热度排出的Top 10，已验证并推荐使用
 class TopNotesView(generics.ListAPIView):
     serializer_class = NoteSimpleSerializer
@@ -400,36 +340,6 @@ class NotesByCategoryView(generics.ListAPIView):
 
         # 返回当前页的笔记对象列表
         return [top_note.note for top_note in page.object_list]
-
-
-# 根据热度排出的Top 10，没有采用上面提到的异步处理方案，在每次发送请求时现排，已验证
-# class Top10NotesView(generics.ListAPIView):
-#     serializer_class = NoteSerializer
-#     permission_classes = [IsAuthenticatedOrReadOnly]
-#
-#     def get_queryset(self):
-#         # 过滤出所有用户的非私有笔记
-#         queryset = Note.objects.filter(is_private=False)
-#
-#         # 定义一个最小堆，用于存储 Top 10 笔记
-#         top_10_notes = []
-#
-#         for note in queryset:
-#             # 计算热度
-#             popularity = 0.6 * note.views_count + 0.3 * note.likes_count + 0.1 * note.comments_count
-#
-#             # 如果堆未满或当前笔记的热度大于堆中的最小值
-#             if len(top_10_notes) < 10 or popularity > top_10_notes[0][0]:
-#                 if len(top_10_notes) == 10:
-#                     # 如果堆已满，移除堆顶元素（最小值）
-#                     heapq.heappop(top_10_notes)
-#                 # 将当前笔记加入堆中
-#                 heapq.heappush(top_10_notes, (popularity, note.id, note))
-#
-#         # 从堆中提取 Top 10 笔记，并按热度降序排序
-#         top_10_notes = [note for _, _, note in heapq.nlargest(10, top_10_notes)]
-#
-#         return top_10_notes
 
 
 # 列出某个用户的所有公开笔记（或者用户本人的所有笔记），并按是否置顶和创建时间进行排序，已验证
@@ -611,7 +521,7 @@ class CommentListCreateView(generics.ListCreateAPIView):
         # 使用 MySQL 兼容的时间戳注解
         qs = qs.annotate(
             annotated_likes=Count('likes'),
-            created_ts=UnixTimestamp(F('created_at'))  # 关键修改
+            created_ts=UnixTimestamp(F('created_at'))
         ).annotate(
             sort_group=Case(
                 When(is_refreshed=False, then=Value(0)),
@@ -621,14 +531,14 @@ class CommentListCreateView(generics.ListCreateAPIView):
             ordering_key=Case(
                 When(is_refreshed=False,
                      then=ExpressionWrapper(-F('created_ts'), output_field=FloatField())),
-                default=ExpressionWrapper(-F('annotated_likes'), output_field=FloatField())
+                default=ExpressionWrapper(-F('likes_count'), output_field=FloatField())
             )
         ).order_by('sort_group', 'ordering_key', '-id')
 
         # 子评论查询集同样使用 UnixTimestamp
         replies_qs = Comment.objects.filter(parent__isnull=False).annotate(
             annotated_likes=Count('likes'),
-            created_ts=UnixTimestamp(F('created_at'))  # 关键修改
+            created_ts=UnixTimestamp(F('created_at'))
         ).annotate(
             sort_group=Case(
                 When(is_refreshed=False, then=Value(0)),
@@ -638,7 +548,7 @@ class CommentListCreateView(generics.ListCreateAPIView):
             ordering_key=Case(
                 When(is_refreshed=False,
                      then=ExpressionWrapper(-F('created_ts'), output_field=FloatField())),
-                default=ExpressionWrapper(-F('annotated_likes'), output_field=FloatField())
+                default=ExpressionWrapper(-F('likes_count'), output_field=FloatField())
             )
         ).order_by('sort_group', 'ordering_key', '-id')
 
@@ -665,14 +575,14 @@ class SubCommentListView(generics.ListAPIView):
         except Comment.DoesNotExist:
             return Comment.objects.none()
 
-        # 获取所有后代评论（建议改用 CTE 优化）
+        # 获取所有后代评论
         all_descendants = root_comment.get_all_descendants()
         comment_ids = [c.id for c in all_descendants]
 
         qs = Comment.objects.filter(id__in=comment_ids)
         qs = qs.annotate(
             annotated_likes=Count('likes'),
-            created_ts=UnixTimestamp(F('created_at'))  # 关键修改
+            created_ts=UnixTimestamp(F('created_at'))
         ).annotate(
             sort_group=Case(
                 When(is_refreshed=False, then=Value(0)),
@@ -682,13 +592,13 @@ class SubCommentListView(generics.ListAPIView):
             ordering_key=Case(
                 When(is_refreshed=False,
                      then=ExpressionWrapper(-F('created_ts'), output_field=FloatField())),
-                default=ExpressionWrapper(-F('annotated_likes'), output_field=FloatField())
+                default=ExpressionWrapper(-F('likes_count'), output_field=FloatField())
             )
         ).select_related('user').order_by('sort_group', 'ordering_key', '-id')
         return qs
 
 
-# 删除评论（改为物理删除）
+# 删除评论（物理删除）
 class CommentDestroyView(generics.DestroyAPIView):
     queryset = Comment.objects.all()
     serializer_class = CommentSerializer
@@ -720,9 +630,9 @@ class CommentLikeView(APIView):
             liked = True
 
         return Response({
-            'like_count': comment.likes.count(),
+            'likes_count': comment.like_count,
             'is_liked': liked,
-            'dislike_count': comment.dislikes.count(),
+            'dislikes_count': comment.dislike_count,
             'is_disliked': False
         }, status=status.HTTP_200_OK)
 
@@ -845,30 +755,33 @@ class NoteSummarizeView(APIView):
         note_id = request.data.get('note_id')
         if not note_id:
             return Response({'error': '需要提供 note_id'}, status=status.HTTP_400_BAD_REQUEST)
-
-        note = get_object_or_404(Note, pk=note_id, author=request.user)
-
-        # 使用事务和 select_for_update 锁定用户记录
+        # 允许公开笔记或自己的私有笔记
+        note = get_object_or_404(
+            Note,
+            Q(is_private=False) | Q(author=request.user),
+            pk=note_id
+        )
+        # 先调用 AI，失败时不影响用户数据
+        prompt = f"请为以下笔记内容生成简要总结：\n\n{note.content}"
+        try:
+            summary = SparkLiteClient.summarize(prompt)
+        except requests.exceptions.RequestException as e:
+            return Response({'error': f'调用 AI 接口失败：{str(e)}'},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        except (KeyError, ValueError, json.JSONDecodeError) as e:
+            return Response({'error': f'AI 返回数据异常：{str(e)}'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # AI 调用成功后再处理扣减和记录
         with transaction.atomic():
             user = User.objects.select_for_update().get(pk=request.user.pk)
             if user.ai_limits <= 0:
                 return Response({'error': 'AI 使用次数已用尽'}, status=status.HTTP_403_FORBIDDEN)
 
-            prompt = f"请为以下笔记内容生成简要总结：\n\n{note.content}"
-            try:
-                summary = SparkLiteClient.summarize(prompt)
-            except requests.exceptions.RequestException as e:
-                return Response({'error': f'调用 AI 接口失败：{str(e)}'},
-                                status=status.HTTP_502_BAD_GATEWAY)
-            except (KeyError, ValueError, json.JSONDecodeError) as e:
-                return Response({'error': f'AI 返回数据异常：{str(e)}'},
-                                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-            # 扣减 AI 使用次数并记录历史
-            user.ai_limits -= 1
+            # 扣减剩余次数
+            user.ai_limits = F('ai_limits') - 1
             user.save(update_fields=['ai_limits'])
+            user.refresh_from_db()
 
-        # 事务结束后返回结果
         return Response({
             'success': True,
             'summary': summary,

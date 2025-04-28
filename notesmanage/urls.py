@@ -7,7 +7,7 @@ from notesmanage.views import (
     TopNotesView, NoteListView, NotesByCategoryView,
     UserLikedNotesView, CommentListCreateView, CommentDislikeView, SubCommentListView,
     UserFavoriteNotesView, NoteFavoriteView, FollowToggleView, FollowedUsersListView,
-    FollowersListView, CoverThumbnailView, NoteSummarizeView
+    FollowersListView, NoteSummarizeView
 )
 from rest_framework.routers import DefaultRouter
 from .views import DraftNoteViewSet, PublishedNoteViewSet
@@ -35,7 +35,7 @@ urlpatterns = [
                   # 使用视图逻辑的用户创建笔记
                   # path('notes/create', NoteCreateView.as_view(), name='note-list-create'),
                   # 封面图预览
-                  path('notes/<int:note_id>/covers/thumbnail/<str:filename>/',CoverThumbnailView.as_view(), name='cover-thumbnail'),
+                  # path('notes/<int:note_id>/covers/thumbnail/<str:filename>/',CoverThumbnailView.as_view(), name='cover-thumbnail'),
                   # 多功能，集笔记访问（客人用户访问时read_only，同时浏览数增加；笔记所有者访问时可以对笔记进行修改和删除）
                   path('notes/<int:pk>/', NoteRetrieveUpdateDestroyView.as_view(), name='note-retrieve-update-destroy'),
                   # 关注功能

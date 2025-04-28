@@ -12,7 +12,6 @@ from django.contrib import messages
 
 # 自定义创建用户的表单
 class UserCreationForm(forms.ModelForm):
-    """用于创建新用户的表单，包含所有必需的字段，以及一个重复的密码字段。"""
     password1 = forms.CharField(label='密码', widget=forms.PasswordInput)
     password2 = forms.CharField(label='确认密码', widget=forms.PasswordInput)
 

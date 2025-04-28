@@ -22,24 +22,21 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.close()
             return
 
-        # 若当前对话中作者已拉黑访客，且当前用户是访客，则拒绝连接
-        if await self.is_user_blocked(self.user, conversation):
-            await self.close()
-            return
+        # # 若当前对话中作者已拉黑访客，且当前用户是访客，则拒绝连接
+        # if await self.is_user_blocked(self.user, conversation):
+        #     await self.close()
+        #     return
 
         # 加入频道组并接受连接
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
-
+        # 连接时把所有“发给我”的历史未读消息标为已读
+        await self.mark_unread_as_read()
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
     async def receive(self, text_data=None, bytes_data=None):
-        """
-        处理收到的消息，检查发送限制后保存消息并广播
-        前端发送 JSON：{"content": "消息内容", "message_type": "text"}
-        （附件情况可通过其他方式上传后返回 URL，再发送消息）
-        """
+        # 处理收到的消息，检查发送限制后保存消息并广播
         if text_data is None:
             return  # 忽略空数据
 
@@ -65,7 +62,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'message_type': message.message_type,
                 'content': message.content,
                 'timestamp': message.timestamp.isoformat()
-            }
+            },
+            'sender_id': self.user.id,
         }
         # 广播给对话组
         await self.channel_layer.group_send(
@@ -77,12 +75,41 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
 
     async def chat_message(self, event):
-        await self.send(text_data=event['text'])
+        """
+        收到 group_send 的事件后：
+         - 如果当前用户不是发送者，则立即标为已读
+         - 然后推送到前端
+         """
+        # 先把之前发过来的 JSON 文本解析成 dict
+        data = json.loads(event['text'])
+        msg = data['message']
+        message_id = msg['id']
+        sender_username = msg['sender']
+        message_type = msg['message_type']
+        content = msg['content']
+        timestamp = msg['timestamp']
+        # 如果还需要 sender_id，就要在发送时把它也放到 data 里：data['sender_id']
+        sender_id = data.get('sender_id')
+
+        # 给在线的“我”打已读标签
+        if self.user.id != sender_id:
+            await self.mark_message_read(message_id)
+
+        # 转发到前端
+        await self.send(text_data=json.dumps({
+            'type': 'chat_message',
+            'message': {
+                'id': message_id,
+                'sender': sender_username,
+                'message_type': message_type,
+                'content': content,
+                'timestamp': timestamp,
+                'is_read': True if self.user.id != sender_id else False
+            }
+        }, ensure_ascii=False))
 
     async def message_retract(self, event):
-        """
-        收到撤回广播后，根据是否为撤回者，发送不同的提示。
-        """
+        # 收到撤回广播后，根据是否为撤回者，发送不同的提示。
         retractor_id = event['retractor_id']
         message_id = event['message_id']
         if self.user.id == retractor_id:
@@ -107,15 +134,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
     def user_in_conversation(self, user, conversation):
         return user in conversation.participants.all()
 
-    @database_sync_to_async
-    def is_user_blocked(self, user, conversation):
-        """
-        如果当前对话为私信（双人聊天），并且作者拉黑了访客，则当用户为访客时返回 True。
-        """
-        if conversation.author and conversation.visitor:
-            if user == conversation.visitor and conversation.author_blocked:
-                return True
-        return False
+    # @database_sync_to_async
+    # def is_user_blocked(self, user, conversation):
+    #     # 如果当前对话为私信（双人聊天），并且作者拉黑了访客，则当用户为访客时返回 True。
+    #     if conversation.author and conversation.visitor:
+    #         if user == conversation.visitor and conversation.author_blocked:
+    #             return True
+    #     return False
 
     @database_sync_to_async
     def create_message(self, conversation_id, sender, content, message_type):
@@ -152,3 +177,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
             else:
                 break
         return count < limit
+
+    @database_sync_to_async
+    def mark_message_read(self, message_id):
+        return Message.objects.filter(id=message_id, is_read=False).update(is_read=True)
+
+    @database_sync_to_async
+    def mark_unread_as_read(self):
+        conv = Conversation.objects.get(id=self.conversation_id)
+        return Message.objects.filter(
+            conversation=conv,
+            is_read=False
+        ).exclude(sender=self.user).update(is_read=True)

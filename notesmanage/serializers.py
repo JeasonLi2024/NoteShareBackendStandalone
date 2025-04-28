@@ -45,8 +45,8 @@ class UserSerializer(serializers.ModelSerializer):
 class CommentSerializer(serializers.ModelSerializer):
     note = serializers.PrimaryKeyRelatedField(read_only=True)  # 不让前端传递
     user = UserSerializer(read_only=True)
-    like_count = serializers.IntegerField(source='annotated_likes', read_only=True)
-    dislike_count = serializers.IntegerField(read_only=True)
+    # like_count = serializers.IntegerField(source='annotated_likes', read_only=True)
+    # dislike_count = serializers.IntegerField(read_only=True)
     is_liked = serializers.SerializerMethodField()
     is_disliked = serializers.SerializerMethodField()
     display_content = serializers.SerializerMethodField()
@@ -56,8 +56,8 @@ class CommentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Comment
         fields = [
-            'id', 'note', 'user', 'parent', 'content', 'dislike_count', 'created_at',
-            'updated_at', 'like_count', 'is_liked', 'is_disliked', 'display_content', 'top_replies', 'total_replies'
+            'id', 'note', 'user', 'parent', 'content', 'likes_count', 'dislikes_count', 'created_at',
+            'is_liked', 'is_disliked', 'display_content', 'top_replies', 'total_replies'
         ]
         read_only_fields = ['id', 'user', 'created_at', 'updated_at', 'like_count', 'is_liked', 'is_disliked']
 

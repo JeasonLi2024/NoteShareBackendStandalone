@@ -16,15 +16,18 @@ def periodic_update_top_notes():
     TopNote.objects.all().delete()
 
     # 创建新的TopNote记录
-    for index, note in enumerate(all_public_notes):
-        TopNote.objects.create(note=note, popularity=note.popularity, rank=index + 1)
+    bulk_data = [
+        TopNote(note=note, popularity=note.popularity, rank=index + 1)
+        for index, note in enumerate(all_public_notes)
+    ]
+    TopNote.objects.bulk_create(bulk_data)
 
     print("All public notes updated and saved in TopNote.")
 
 @shared_task
 def refresh_comments_order():
     """
-    每 20 分钟执行一次任务，将创建时间超过 20 分钟且未刷新过的评论
+    每 5 分钟执行一次任务，将创建时间超过 20 分钟且未刷新过的评论
     标记为已刷新，此时这些评论将在排序时采用点赞数排序。
     """
     threshold = timezone.now() - timedelta(minutes=20)

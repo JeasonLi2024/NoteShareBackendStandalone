@@ -26,7 +26,7 @@ class NoteAdmin(admin.ModelAdmin):
             'all': ('css/ckeditor5_custom.css',)
         }
     # 列表显示字段
-    list_display = ('id', 'title', 'author', 'views_count', 'category', 'created_at', 'is_private', 'body', 'popularity')
+    list_display = ('id', 'title', 'author', 'views_count', 'likes_count', 'created_at', 'is_private', 'body', 'popularity')
 
     # 可跳转的字段
     list_display_links = ['id', 'title', 'author']
@@ -136,7 +136,7 @@ class TopNoteAdmin(admin.ModelAdmin):
 
 @admin.register(Comment)
 class CommentAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'note', 'created_at', 'content', 'like_count', 'dislike_count', 'parent')
+    list_display = ('id', 'user', 'note', 'created_at', 'content', 'likes_count', 'parent')
 
     list_display_links = ['id', 'user', 'content']
 
@@ -146,7 +146,7 @@ class CommentAdmin(admin.ModelAdmin):
 
     # readonly_fields = ('like_count',)
 
-    def like_count(self, obj):
-        return obj.like_count
-    like_count.short_description = '点赞数'
+    def likes_count(self, obj):
+        return obj.likes_count
+    likes_count.short_description = '点赞数'
 

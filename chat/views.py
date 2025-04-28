@@ -1,7 +1,4 @@
 import os
-import subprocess
-from tempfile import NamedTemporaryFile
-from django.core.files import File
 from datetime import timedelta
 from django.utils import timezone
 from channels.layers import get_channel_layer
@@ -17,12 +14,9 @@ from rest_framework.response import Response
 from .utils import get_overall_unread_count
 
 User = get_user_model()
-
+# 获取指定对话的所有消息记录（按发送时间正序排列）
 class ConversationMessagesView(generics.ListAPIView):
-    """
-    获取指定对话的所有消息记录（按发送时间正序排列）
-    URL中需要传入 conversation_id 参数
-    """
+
     serializer_class = MessageSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [filters.SearchFilter]
@@ -42,6 +36,10 @@ class ConversationMessagesView(generics.ListAPIView):
         # 若不满足条件，返回空查询集
         return Message.objects.none()
 
+    def get_serializer_context(self):
+        # 把 request 透传给 serializer，为构造绝对 URL 服务
+        return {'request': self.request}
+
     def list(self, request, *args, **kwargs):
         conv = self.get_conversation()
         if not conv or request.user not in conv.participants.all():
@@ -50,19 +48,12 @@ class ConversationMessagesView(generics.ListAPIView):
                 "messages": []
             }, status=status.HTTP_200_OK)
 
-        # —— 在这里把所有该对话里、发送者不是当前用户、且 is_read=False 的消息标为已读 ——
-        Message.objects.filter(
-            conversation=conv,
-            is_read=False
-        ).exclude(sender=request.user).update(is_read=True)
-
         qs = self.get_queryset()
         serializer = self.get_serializer(qs, many=True)
         return Response({
             "conversation_id": conv.id,
             "messages": serializer.data,
         }, status=status.HTTP_200_OK)
-
 
 
 # 展示当前用户所有私信对话列表，每个对话可以包含最后一条消息预览等信息
@@ -88,7 +79,7 @@ class UserConversationsView(generics.ListAPIView):
             "conversations": serializer.data,
         }, status=status.HTTP_200_OK)
 
-
+# 消息撤回
 class MessageDeleteView(generics.DestroyAPIView):
     queryset = Message.objects.all()
     permission_classes = [IsAuthenticated]
@@ -121,64 +112,23 @@ class MessageDeleteView(generics.DestroyAPIView):
                 'retractor_id': retractor_id,
             }
         )
-
         # 并且 HTTP 端也给撤回者提示
         return Response({'detail': '你撤回了一条消息'}, status=status.HTTP_200_OK)
 
-# # 批量删除聊天消息接口
-# class MessageBulkDeleteView(APIView):
-#     """
-#     前端需要传递一个 JSON 参数：
-#     {
-#         "ids": [1, 2, 3, ...]
-#     }
-#     """
+
+# 允许作者对某个对话拉黑或取消拉黑访客，由于加上了单次最多发送消息数，现在不用拉黑功能
+# class ToggleBlockView(generics.UpdateAPIView):
+#     queryset = Conversation.objects.all()
 #     permission_classes = [IsAuthenticated]
 #
-#     def post(self, request, *args, **kwargs):
-#         message_ids = request.data.get('ids', [])
-#         if not message_ids:
-#             return Response({'detail': '消息ID列表不能为空'}, status=status.HTTP_400_BAD_REQUEST)
-#
-#         # 仅删除属于当前用户的消息
-#         messages = Message.objects.filter(id__in=message_ids, sender=request.user)
-#         if not messages.exists():
-#             return Response({'detail': '未找到相应消息或无权限删除'}, status=status.HTTP_404_NOT_FOUND)
-#         count = messages.count()
-#         messages.delete()
-#         return Response({'detail': f'{count} 条消息已删除'}, status=status.HTTP_200_OK)
-#
-#
-# # 删除某个聊天室（对话）内的所有消息。
-# class ConversationMessagesDeleteView(APIView):
-#     permission_classes = [IsAuthenticated]
-#
-#     def delete(self, request, conversation_id, *args, **kwargs):
-#         try:
-#             conversation = Conversation.objects.get(id=conversation_id)
-#         except Conversation.DoesNotExist:
-#             return Response({'detail': '对话不存在'}, status=status.HTTP_404_NOT_FOUND)
-#
-#         if request.user not in conversation.participants.all():
-#             return Response({'detail': '无访问该对话的权限'}, status=status.HTTP_403_FORBIDDEN)
-#
-#         count, _ = conversation.messages.all().delete()
-#         return Response({'detail': f'{count} 条消息已删除'}, status=status.HTTP_200_OK)
-
-
-# 允许作者对某个对话拉黑或取消拉黑访客
-class ToggleBlockView(generics.UpdateAPIView):
-    queryset = Conversation.objects.all()
-    permission_classes = [IsAuthenticated]
-
-    def update(self, request, *args, **kwargs):
-        conversation = self.get_object()
-        # 验证当前用户是否为作者
-        if conversation.author != request.user:
-            return Response({'detail': '无权限操作'}, status=status.HTTP_403_FORBIDDEN)
-        conversation.author_blocked = not conversation.author_blocked
-        conversation.save(update_fields=['author_blocked'])
-        return Response({'detail': f"拉黑状态已更新为 {conversation.author_blocked}"}, status=status.HTTP_200_OK)
+#     def update(self, request, *args, **kwargs):
+#         conversation = self.get_object()
+#         # 验证当前用户是否为作者
+#         if conversation.author != request.user:
+#             return Response({'detail': '无权限操作'}, status=status.HTTP_403_FORBIDDEN)
+#         conversation.author_blocked = not conversation.author_blocked
+#         conversation.save(update_fields=['author_blocked'])
+#         return Response({'detail': f"拉黑状态已更新为 {conversation.author_blocked}"}, status=status.HTTP_200_OK)
 
 
 # 切换免打扰状态，当前用户可以设置在某个对话内是否开启免打扰。
@@ -271,13 +221,6 @@ class UploadAttachmentView(APIView):
             attachment=file_obj
         )
 
-        # 针对视频类型，生成预览图
-        if message_type == "video":
-            success = generate_video_preview(message)
-            if not success:
-                # 可选择删除记录或记录错误日志。此处仅返回提示信息
-                return Response({"detail": "视频上传成功，但生成预览图失败"}, status=status.HTTP_201_CREATED)
-
         attachment_url = ""
         if message.attachment:
             attachment_url = request.build_absolute_uri(message.attachment.url)
@@ -290,33 +233,3 @@ class UploadAttachmentView(APIView):
             "preview_url": preview_url,
             "message_id": message.id
         }, status=status.HTTP_201_CREATED)
-
-def generate_video_preview(message):
-    """
-    使用 ffmpeg 从 message.attachment 中生成一张预览图，
-    并保存到 message.preview_image 字段。返回 True/False 表示成功与否。
-    """
-    if not message.attachment:
-        return False
-
-    input_path = message.attachment.path
-    # 创建临时文件用于存储预览图
-    with NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-        output_path = tmp.name
-
-    # 构造 ffmpeg 命令：在视频 1 秒处截取一帧
-    command = ['ffmpeg', '-i', input_path, '-ss', '00:00:01.000', '-vframes', '1', output_path]
-    try:
-        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # 将生成的图片保存至 Message.preview_image 字段
-        with open(output_path, 'rb') as f:
-            django_file = File(f)
-            filename = os.path.basename(output_path)
-            message.preview_image.save(filename, django_file, save=True)
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"生成视频预览图失败：{e}")
-        return False
-    finally:
-        if os.path.exists(output_path):
-            os.remove(output_path)

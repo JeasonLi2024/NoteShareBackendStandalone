@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-
+from django.core.cache import cache
 from user.models import PointHistory, Goods
 
 UserModel = get_user_model()
@@ -10,6 +10,34 @@ class UserSerializer(serializers.ModelSerializer):
     phone = serializers.CharField(required=False)
     avatar = serializers.SerializerMethodField()
     is_following = serializers.SerializerMethodField()
+    # 邮箱更新验证字段
+    new_email = serializers.EmailField(write_only=True, required=False)
+    email_code = serializers.CharField(write_only=True, required=False)
+    # 密码更新验证字段
+    old_password = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        error_messages={
+            'required': '修改密码必须提供旧密码'
+        }
+    )
+    new_password = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        error_messages={
+            'required': '必须提供新密码'
+        }
+    )
+    confirm_password = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        error_messages={
+            'required': '必须确认新密码'
+        }
+    )
 
     class Meta:
         model = UserModel
@@ -17,12 +45,54 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'avatar', 'phone', 'created_at', 'last_login',
             'school', 'major', 'grade', 'introduction', 'total_notes', 'total_likes',
             'total_views', 'following_count', 'followers_count', 'is_following', 'ai_limits', 'points',
-            'points_note_publish'
+            'points_note_publish', 'old_password', 'new_password', 'confirm_password', 'new_email',
+            'email_code'
         )
-        extra_kwargs = {'password': {'write_only': True}}
-        read_only_fields = ('created_at', 'last_login')
+        extra_kwargs = {
+            'password': {'write_only': True},
+            'email': {'read_only': True}
+        }
+        read_only_fields = ('created_at', 'last_login', 'total_notes', 'total_likes', 'total_views',
+                            'following_count', 'followers_count', 'ai_limits', 'points')
         ref_name = 'UserAppUserSerializer'
 
+    def validate(self, attrs):
+        new_password = attrs.get('new_password')
+        confirm_password = attrs.get('confirm_password')
+        old_password = attrs.get('old_password')
+
+        # 密码修改验证
+        if new_password:
+            if new_password != confirm_password:
+                raise serializers.ValidationError({
+                    'confirm_password': '新密码与确认密码不一致'
+                })
+            if not old_password:
+                raise serializers.ValidationError({
+                    'old_password': '修改密码需要验证旧密码'
+                })
+
+        # 邮箱修改验证：提供新邮箱时，必须携带验证码
+        new_email = attrs.get('new_email')
+        email_code = attrs.get('email_code')
+        if new_email and not email_code:
+            raise serializers.ValidationError({
+                'email_code': '修改邮箱需要提供验证码'
+            })
+
+        return attrs
+
+    def update(self, instance, validated_data):
+        # 弹出邮箱更新与密码字段，不在此处执行写入，由视图层统一处理
+        validated_data.pop('new_email', None)
+        validated_data.pop('email_code', None)
+        validated_data.pop('new_password', None)
+        validated_data.pop('old_password', None)
+        validated_data.pop('confirm_password', None)
+        # 更新其他普通字段
+        return super().update(instance, validated_data)
+
+    # 保留原有方法
     def get_following_count(self, obj):
         return obj.following.count()
 
@@ -31,16 +101,13 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_avatar(self, obj):
         request = self.context.get('request')
-        # 假设 avatar 是一个 ImageField 或者其他类型的字段
-        # 返回头像的 URL 或其他相关信息
         if not request or not obj.avatar:
-            return None  # 或者返回一个默认的值
+            return None
         return request.build_absolute_uri(obj.avatar.url)
 
     def get_is_following(self, obj):
         request = self.context.get("request")
-        if request and request.user and request.user.is_authenticated:
-            # 检查当前请求用户的 following 集合中是否存在该对象
+        if request and request.user.is_authenticated:
             return request.user.following.filter(id=obj.id).exists()
         return False
 
@@ -53,10 +120,10 @@ class UserCreateSerializer(serializers.ModelSerializer):
         model = UserModel
         fields = [
             'id', 'username', 'password', 'email', 'avatar', 'phone',
-            'school', 'major', 'grade', 'verification_code'  # 添加新的字段
+            'school', 'major', 'grade', 'verification_code'
         ]
         extra_kwargs = {
-            'password': {'write_only': True}  # 密码只写不读
+            'password': {'write_only': True}
         }
 
     def create(self, validated_data):
@@ -112,6 +179,27 @@ class LoginSerializer(serializers.Serializer):
             print("没用当前用户信息。")
 
         raise serializers.ValidationError("无法使用提供的信息登录。")
+
+# 邮箱+验证码登录
+class EmailLoginSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    verification_code = serializers.CharField(max_length=6)
+
+    def validate(self, attrs):
+        email = attrs.get('email')
+        verification_code = attrs.get('verification_code')
+        cache_key = f'verification_code:{email}'
+        stored = cache.get(cache_key)
+        if not stored or stored != verification_code:
+            raise serializers.ValidationError({'verification_code': '验证码无效或已过期'})
+        # 验证通过后可以删除缓存
+        cache.delete(cache_key)
+        # 获取用户
+        user, created = UserModel.objects.get_or_create(email=email, defaults={
+            'username': email.split('@')[0]
+        })
+        attrs['user'] = user
+        return attrs
 
 
 class PointHistorySerializer(serializers.ModelSerializer):

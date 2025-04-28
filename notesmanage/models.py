@@ -293,7 +293,8 @@ class Comment(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='用户')
     parent = models.ForeignKey(
         'self', null=True, blank=True, on_delete=models.CASCADE,  # 保持级联删除
-        related_name='replies'
+        related_name='replies',
+        verbose_name='父评论'
     )
     content = models.TextField(verbose_name='评论内容')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
@@ -301,6 +302,8 @@ class Comment(models.Model):
     likes = models.ManyToManyField(User, related_name='liked_comments', blank=True)
     dislikes = models.ManyToManyField(User, related_name='disliked_comments', blank=True)
     is_refreshed = models.BooleanField(default=False, verbose_name="已参与点赞排序")
+    likes_count = models.IntegerField(default=0,verbose_name='点赞数')
+    dislikes_count = models.IntegerField(default=0)
 
     def __str__(self):
         return f"Comment({self.user}, {self.content[:20]})"
@@ -343,6 +346,7 @@ class Comment(models.Model):
         verbose_name_plural = '笔记评论管理'
         # 注意：为了视图中实现动态排序，这里可不设置默认 ordering
         indexes = [
-            models.Index(fields=['parent']),  # 加速层级查询
-            models.Index(fields=['-created_at']),
+            models.Index(fields=['parent'], name='idx_parent'),
+            models.Index(fields=['is_refreshed', '-created_at', '-likes_count'], name='idx_hybrid_sort'),
+            models.Index(fields=['note', 'parent', 'is_refreshed'], name='idx_note_parent'),
         ]

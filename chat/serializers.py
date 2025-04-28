@@ -4,10 +4,24 @@ from .models import Conversation, Message
 
 class MessageSerializer(serializers.ModelSerializer):
     sender_username = serializers.CharField(source='sender.username', read_only=True)
+    attachment_url = serializers.SerializerMethodField()
+    preview_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
-        fields = ['id', 'sender_username', 'message_type', 'content', 'timestamp', 'is_read']
+        fields = ['id', 'sender_username', 'message_type', 'content', 'timestamp', 'is_read', 'attachment_url', 'preview_url']
+
+    def get_attachment_url(self, obj):
+        request = self.context.get('request')
+        if obj.attachment:
+            return request.build_absolute_uri(obj.attachment.url)
+        return None
+
+    def get_preview_url(self, obj):
+        request = self.context.get('request')
+        if hasattr(obj, 'preview_image') and obj.preview_image:
+            return request.build_absolute_uri(obj.preview_image.url)
+        return None
 
 
 class ConversationSerializer(serializers.ModelSerializer):

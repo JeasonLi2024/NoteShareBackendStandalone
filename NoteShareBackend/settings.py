@@ -27,7 +27,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-$cjwom+ue1_w@m$514zvtkk9wxu3z01phdwcapxj04*+-jl&r@"
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -160,6 +160,17 @@ DATABASES = {
         'USER': DB_USER,
         'PASSWORD': DB_PASSWORD,
         'HOST': '127.0.0.1',
+        'OPTIONS': {
+            # 确保连接、创建表时都用 utf8mb4
+            'charset': 'utf8mb4',
+            'use_unicode': True,
+            'init_command': (
+                "SET sql_mode='STRICT_TRANS_TABLES', "
+                "innodb_strict_mode=1, "
+                "character_set_connection=utf8mb4, "
+                "collation_connection=utf8mb4_unicode_ci"
+            ),
+        },
     }
 }
 
@@ -414,13 +425,12 @@ CELERY_BEAT_SCHEDULE = {
     },
     'refresh-comments-every-5-min': {
         'task': 'notesmanage.tasks.refresh_comments_order',
-        'schedule': 600,  # 每5分钟执行一次
+        'schedule': 300,  # 每5分钟执行一次
     },
     'reset_daily_counters': {
         'task': 'user.tasks.reset_daily_counters',
         'schedule': crontab(hour=0, minute=0),
     },
 }
-
 
 FFMPEG_PATH = r"E:\ffmpeg-7.1.1-full_build-shared\bin\ffmpeg.exe"

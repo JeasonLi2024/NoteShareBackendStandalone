@@ -8,9 +8,7 @@ from user.models import PointHistory
 from .models import Note, Like, Comment, Favorite, DraftNote, TopNote
 from django.contrib.auth import get_user_model
 from django.db import transaction
-import os
-import glob
-from django.conf import settings
+
 # 导入通知模型
 from notifications.models import Notification
 
@@ -55,11 +53,21 @@ def handle_comment_change(sender, instance, **kwargs):
     Note.objects.filter(id=note.id).update(comments_count=F('comments_count') + delta)
     update_note_popularity(note.id)
 
+@receiver(m2m_changed, sender=Comment.likes.through)
+def update_likes_count(sender, instance, action, **kwargs):
+    if action in ('post_add', 'post_remove', 'post_clear'):
+        instance.likes_count = instance.likes.count()
+        instance.save(update_fields=['likes_count'])
+
+@receiver(m2m_changed, sender=Comment.dislikes.through)
+def update_dislikes_count(sender, instance, action, **kwargs):
+    if action in ('post_add', 'post_remove', 'post_clear'):
+        instance.dislikes_count = instance.dislikes.count()
+        instance.save(update_fields=['dislikes_count'])
+
+# 当 TopNote 新增或更新时，如果排名进入前 10 并且笔记未标记过优质，则标记并奖励。
 @receiver(post_save, sender=TopNote)
 def reward_on_top_quality(sender, instance, created, **kwargs):
-    """
-    当 TopNote 新增或更新时，如果排名进入前 10 并且笔记未标记过优质，则标记并奖励。
-    """
     note = instance.note
     # 只处理进入 Top10 的情况
     if instance.rank <= 10 and not note.is_top_quality:
