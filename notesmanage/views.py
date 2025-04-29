@@ -1,4 +1,4 @@
-import os, shutil, json, requests
+import os, shutil, json, requests, redis
 import tempfile
 import subprocess
 from django.conf import settings
@@ -20,7 +20,9 @@ from .serializers import(
     NoteSerializer, CommentSerializer, NoteSimpleSerializer, NoteLikeSerializer,
     NoteFavoriteSerializer, UserSerializer, DraftNoteSerializer
 )
+from django_redis import get_redis_connection
 from django.db.models import Prefetch
+from .tasks import periodic_update_top_notes  # 替换为实际路径
 from .utils import UnixTimestamp
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
@@ -28,6 +30,8 @@ from django.db.models import Count, F, ExpressionWrapper, IntegerField, FloatFie
 from .permissions import IsOwnerOrReadOnly
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAuthenticatedOrReadOnly
 from .ai_conclude import SparkLiteClient
+from django.core.cache import cache
+from django.core.files.base import ContentFile
 
 
 User = get_user_model()
@@ -64,17 +68,33 @@ class DraftNoteViewSet(viewsets.ModelViewSet):
         return super().get_queryset().filter(author=self.request.user)
 
     def create(self, request, *args, **kwargs):
-        # 1. 验证并保存草稿
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        draft = serializer.save(author=request.user)
+        try:
+            # 1. 验证并保存草稿
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            draft = serializer.save(author=request.user)
 
-        # 2. 处理所有附件（图片／视频／封面／文件）
-        self.handle_attachments(draft, request.FILES)
+            # 2. 处理所有附件（图片／视频／封面／文件）
+            self.handle_attachments(draft, request.FILES)
 
-        # 3. 重新序列化，返回完整对象
-        out_serializer = self.get_serializer(draft, context={'request': request})
-        headers = self.get_success_headers(out_serializer.data)
+            # 3. 重新序列化，返回完整对象
+            out_serializer = self.get_serializer(draft, context={'request': request})
+            headers = self.get_success_headers(out_serializer.data)
+        except ValidationError as exc:
+            # 提取所有错误信息
+            error_messages = []
+            for field_errors in exc.detail.values():
+                if isinstance(field_errors, list):
+                    error_messages.extend([str(e) for e in field_errors])
+                else:
+                    error_messages.append(str(field_errors))
+            # 构造响应
+            return Response({
+                "code": status.HTTP_400_BAD_REQUEST,
+                "message": "验证失败: " + ", ".join(error_messages),
+                "data": None
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         return Response({
             "code": status.HTTP_201_CREATED,
             "message": "Draft created successfully",
@@ -85,7 +105,9 @@ class DraftNoteViewSet(viewsets.ModelViewSet):
         # 1. 手动上传封面
         if 'cover_image' in files:
             ci = files['cover_image']
-            draft.cover_image.save(ci.name, ci, save=False)
+            content = ci.read()  # 读取内容到内存
+            file_obj = ContentFile(content, name=ci.name)
+            draft.cover_image.save(ci.name, file_obj, save=False)
             draft.uploaded_cover_type = 'uploaded'
             draft.uploaded_cover_path = draft.cover_image.name
             draft.save()
@@ -200,7 +222,7 @@ class DraftNoteViewSet(viewsets.ModelViewSet):
                 raise ValidationError('无效封面')
             draft.cover_image.name = key
         else:
-            raise ValidationError('无效类型')
+            raise ValidationError('封面是无效类型')
 
         draft.save()
         return Response({'msg': '封面更新成功'})
@@ -310,36 +332,116 @@ class PublishedNoteViewSet(viewsets.ModelViewSet):
 
 
 # 异步功能根据热度排出的Top 10，已验证并推荐使用
+# class TopNotesView(generics.ListAPIView):
+#     serializer_class = NoteSimpleSerializer
+#     permission_classes = [AllowAny]
+#
+#     def get_queryset(self):
+#         # 从TopNote模型中获取Top 10笔记
+#         top_notes = TopNote.objects.order_by('rank').select_related('note')[:10]
+#         # 提取关联的 Note 对象列表
+#         return [tn.note for tn in top_notes]
 class TopNotesView(generics.ListAPIView):
     serializer_class = NoteSimpleSerializer
     permission_classes = [AllowAny]
 
     def get_queryset(self):
-        # 从TopNote模型中获取Top 10笔记
-        top_notes = TopNote.objects.order_by('rank').select_related('note')[:10]
-        # 提取关联的 Note 对象列表
-        return [tn.note for tn in top_notes]
+        redis_key = "top_notes:all"  # 全局热度排序Key
+        conn = get_redis_connection("default")  # 正确获取连接
 
+        try:
+            # 从Redis获取前10笔记ID（降序）
+            note_ids = conn.zrevrange(redis_key, 0, 9)
+            if note_ids:
+                # 将bytes类型转换为字符串
+                note_ids = [int(nid.decode()) for nid in note_ids]
+                # 批量获取Note对象并保持顺序
+                notes = Note.objects.in_bulk(note_ids, field_name='id')
+                print(notes)
+                return [notes[nid] for nid in note_ids if nid in notes]
+            else:
+                # 缓存未命中：触发异步更新并回退数据库
+                periodic_update_top_notes.delay()
+                return self._fallback_to_db()
+
+        except redis.ConnectionError:
+            return self._fallback_to_db()
+
+    def _fallback_to_db(self):
+        """降级到数据库查询"""
+        return Note.objects.filter(
+            topnote__isnull=False
+        ).order_by('-topnote__rank').select_related('topnote')[:10]
 
 # 按类别进行热度排序并加上了分页处理，已验证
+# class NotesByCategoryView(generics.ListAPIView):
+#     serializer_class = NoteSimpleSerializer
+#     permission_classes = [AllowAny]
+#
+#     def get_queryset(self):
+#         category = self.kwargs['category']
+#         page_number = self.kwargs.get('page_number', 1)
+#         page_size = self.kwargs.get('page_size', 10)
+#
+#         # 从TopNote模型中获取指定类别的笔记
+#         top_notes = TopNote.objects.filter(note__category=category).order_by('rank')
+#
+#         # 使用 Paginator 进行分页
+#         paginator = Paginator(top_notes, page_size)
+#         page = paginator.get_page(page_number)
+#
+#         # 返回当前页的笔记对象列表
+#         return [top_note.note for top_note in page.object_list]
 class NotesByCategoryView(generics.ListAPIView):
     serializer_class = NoteSimpleSerializer
     permission_classes = [AllowAny]
 
     def get_queryset(self):
         category = self.kwargs['category']
-        page_number = self.kwargs.get('page_number', 1)
-        page_size = self.kwargs.get('page_size', 10)
+        page = int(self.kwargs.get('page_number', 1))
+        page_size = int(self.kwargs.get('page_size', 10))
 
-        # 从TopNote模型中获取指定类别的笔记
-        top_notes = TopNote.objects.filter(note__category=category).order_by('rank')
+        # Redis键按分类隔离
+        redis_key = f"top_notes:category:{category}"
+        conn = get_redis_connection("default")
 
-        # 使用 Paginator 进行分页
-        paginator = Paginator(top_notes, page_size)
-        page = paginator.get_page(page_number)
+        try:
+            # 计算分页偏移
+            start = (page - 1) * page_size
+            end = start + page_size - 1
+            # 获取当前页的笔记ID
+            note_ids = conn.zrevrange(redis_key, start, end)
+            if note_ids:
+                note_ids = [nid.decode() for nid in note_ids]
+                notes = Note.objects.in_bulk(note_ids, field_name='id')
+                return [notes[nid] for nid in note_ids if nid in notes]
+            else:
+                # 触发分类缓存更新
+                self._update_category_cache(category)
+                return self._fallback_to_db(category, page, page_size)
 
-        # 返回当前页的笔记对象列表
-        return [top_note.note for top_note in page.object_list]
+        except redis.ConnectionError:
+            return self._fallback_to_db(category, page, page_size)
+
+    def _update_category_cache(self, category):
+        """按分类更新缓存"""
+        notes = Note.objects.filter(
+            category=category, is_private=False
+        ).order_by('-popularity')
+        pipe = cache.get_redis_connection().pipeline()
+        pipe.delete(f"top_notes:category:{category}")
+        for note in notes:
+            pipe.zadd(f"top_notes:category:{category}", {note.id: note.popularity})
+        pipe.expire(f"top_notes:category:{category}", 3600 * 24)
+        pipe.execute()
+
+    def _fallback_to_db(self, category, page, page_size):
+        """数据库降级查询"""
+        paginator = Paginator(
+            Note.objects.filter(category=category).order_by('-popularity'),
+            page_size
+        )
+        return paginator.get_page(page).object_list
 
 
 # 列出某个用户的所有公开笔记（或者用户本人的所有笔记），并按是否置顶和创建时间进行排序，已验证
@@ -395,12 +497,33 @@ class NoteRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
         }, status=status.HTTP_200_OK)
 
     #update方法处理 PUT 和 PATCH 请求，更新笔记内容，并返回成功消息和更新后的数据
+    # def update(self, request, *args, **kwargs):
+    #     partial = kwargs.pop('partial', False)
+    #     instance = self.get_object()
+    #     serializer = self.get_serializer(instance, data=request.data, partial=partial)
+    #     serializer.is_valid(raise_exception=True)
+    #     serializer.save()
+    #     return Response({
+    #         "code": status.HTTP_200_OK,
+    #         "message": "Note updated successfully",
+    #         "data": serializer.data
+    #     }, status=status.HTTP_200_OK)
+
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
+
+        try:
+            serializer.is_valid(raise_exception=True)
+        except ValidationError:
+            return Response({
+                "code": status.HTTP_400_BAD_REQUEST,
+                "message": "Validation error",
+                "data": serializer.errors  # 返回详细错误信息
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        self.perform_update(serializer)
         return Response({
             "code": status.HTTP_200_OK,
             "message": "Note updated successfully",

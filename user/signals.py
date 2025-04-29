@@ -73,10 +73,13 @@ def reward_on_comment(sender, instance, created, **kwargs):
     note      = instance.note
     actor_id  = instance.user_id
     author_id = note.author_id
-    parent    = instance.parent  # 之前用 reply_to，现在改成 parent
+    try:
+        parent = instance.parent
+    except:
+        parent = None
 
     # 跳过：A 评论自己的笔记，或 A 回复自己发布的评论
-    if actor_id == author_id or (parent and parent.user_id == actor_id):
+    if actor_id == author_id or (parent.user_id == actor_id):
         return
 
     with transaction.atomic():
@@ -102,10 +105,13 @@ def undo_on_comment(sender, instance, **kwargs):
     note      = instance.note
     actor_id  = instance.user_id
     author_id = note.author_id
-    parent    = instance.parent
+    try:
+        parent = instance.parent
+    except:
+        parent = None
 
     # 跳过：A 取消自己对自己笔记的评论，或 A 取消自己回复自己的评论
-    if actor_id == author_id or (parent and parent.user_id == actor_id):
+    if actor_id == author_id or (parent.user_id == actor_id):
         return
 
     with transaction.atomic():
@@ -146,19 +152,19 @@ def push_notification(user, notification):
          }
     )
 
-@receiver(post_save, sender=PointHistory)
-def point_change_notification(sender, instance, created, **kwargs):
-    if not created or not instance.user:
-        return
-    user = User.objects.get(pk=instance.user.pk)
-    current_points = user.points
-    system_user = User.objects.get(username='adminLi')
-    # 创建站内通知
-    notification = Notification.objects.create(
-        recipient=user,
-        sender=system_user,
-        notification_type='points_change',
-        extra_data={},
-        message=f"您的积分发生变动：{instance.description}，当前总积分：{current_points}"
-    )
-    push_notification(user, notification)
+# @receiver(post_save, sender=PointHistory)
+# def point_change_notification(sender, instance, created, **kwargs):
+#     if not created or not instance.user:
+#         return
+#     user = User.objects.get(pk=instance.user.pk)
+#     current_points = user.points
+#     system_user = User.objects.get(username='adminLi')
+#     # 创建站内通知
+#     notification = Notification.objects.create(
+#         recipient=user,
+#         sender=system_user,
+#         notification_type='points_change',
+#         extra_data={},
+#         message=f"您的积分发生变动：{instance.description}，当前总积分：{current_points}"
+#     )
+#     push_notification(user, notification)

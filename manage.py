@@ -1,3 +1,9 @@
+import sys
+
+if sys.platform.startswith("win"):
+    from twisted.internet import iocpreactor
+
+    iocpreactor.install()  # 切换到 IOCP reactor
 #!/usr/bin/env python
 """Django's command-line utility for administrative tasks."""
 import os

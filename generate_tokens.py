@@ -12,7 +12,7 @@ LOGIN_URL = f"{BASE_URL}/login/"
 
 USER_PREFIX = "loadtest"       # 用户名前缀，比如 loadtest1, loadtest2 ...
 PASSWORD    = "loadtestpass"   # 这些测试账号的统一密码
-COUNT       = 50               # 共生成多少个 token
+COUNT       = 500               # 共生成多少个 token
 OUT_FILE    = "loadtest_tokens.txt"
 # ——————————————————————————————————————————————————————————————————————————
 

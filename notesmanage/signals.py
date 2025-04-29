@@ -1,13 +1,16 @@
-from django.db.models import F
+
 from django.db.models.signals import post_save, post_delete, m2m_changed
 from django.dispatch import receiver
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-
+from django.core.cache import cache
 from user.models import PointHistory
 from .models import Note, Like, Comment, Favorite, DraftNote, TopNote
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import F, Value, Case, When, IntegerField
+from django.db.models.functions import Greatest
+from django_redis import get_redis_connection
 
 # 导入通知模型
 from notifications.models import Notification
@@ -19,6 +22,26 @@ def update_note_popularity(note_id):
     Note.objects.filter(id=note_id).update(
         popularity=F('views_count') * 0.6 + F('likes_count') * 0.3 + F('comments_count') * 0.1
     )
+
+
+@receiver([post_save, post_delete], sender=Note)
+def update_cache_on_note_change(sender, instance, **kwargs):
+    """笔记增删改时更新缓存"""
+    conn = get_redis_connection()
+    pipe = conn.pipeline()
+
+    # 更新全局缓存
+    pipe.zrem("top_notes:all", instance.id)
+    if not kwargs.get('deleted', False):  # 非删除操作时更新分数
+        pipe.zadd("top_notes:all", {instance.id: instance.popularity})
+
+    # 更新分类缓存
+    category_key = f"top_notes:category:{instance.category}"
+    pipe.zrem(category_key, instance.id)
+    if not kwargs.get('deleted', False):
+        pipe.zadd(category_key, {instance.id: instance.popularity})
+
+    pipe.execute()
 
 # 处理收藏
 @receiver(post_save, sender=Favorite)
@@ -53,17 +76,55 @@ def handle_comment_change(sender, instance, **kwargs):
     Note.objects.filter(id=note.id).update(comments_count=F('comments_count') + delta)
     update_note_popularity(note.id)
 
+# @receiver(m2m_changed, sender=Comment.likes.through)
+# def update_likes_count(sender, instance, action, **kwargs):
+#     if action in ('post_add', 'post_remove', 'post_clear'):
+#         instance.likes_count = instance.likes.count()
+#         instance.save(update_fields=['likes_count'])
+#
+# @receiver(m2m_changed, sender=Comment.dislikes.through)
+# def update_dislikes_count(sender, instance, action, **kwargs):
+#     if action in ('post_add', 'post_remove', 'post_clear'):
+#         instance.dislikes_count = instance.dislikes.count()
+#         instance.save(update_fields=['dislikes_count'])
+
 @receiver(m2m_changed, sender=Comment.likes.through)
-def update_likes_count(sender, instance, action, **kwargs):
-    if action in ('post_add', 'post_remove', 'post_clear'):
-        instance.likes_count = instance.likes.count()
-        instance.save(update_fields=['likes_count'])
+def update_likes_count(sender, instance, action, pk_set, **kwargs):
+    # 原子操作更新计数
+    if action == 'post_add':
+        added_count = len(pk_set)
+        Comment.objects.filter(id=instance.id).update(
+            likes_count=Greatest(0, F('likes_count') + added_count)
+        )
+    elif action == 'post_remove':
+        removed_count = len(pk_set)
+        Comment.objects.filter(id=instance.id).update(
+            likes_count=Greatest(0, F('likes_count') - removed_count)
+        )
+    elif action == 'post_clear':
+        Comment.objects.filter(id=instance.id).update(
+            likes_count=Value(0)
+        )
 
 @receiver(m2m_changed, sender=Comment.dislikes.through)
-def update_dislikes_count(sender, instance, action, **kwargs):
-    if action in ('post_add', 'post_remove', 'post_clear'):
-        instance.dislikes_count = instance.dislikes.count()
-        instance.save(update_fields=['dislikes_count'])
+def update_dislikes_count(sender, instance, action, pk_set, **kwargs):
+    # 使用Case/When处理复杂逻辑
+    if action in ('post_add', 'post_remove'):
+        delta = len(pk_set) if action == 'post_add' else -len(pk_set)
+        Comment.objects.filter(id=instance.id).update(
+            dislikes_count=Case(
+                When(
+                    dislikes_count__gte=abs(delta) if delta < 0 else True,
+                    then=Greatest(0, F('dislikes_count') + delta)
+                ),
+                default=0,
+                output_field=IntegerField()
+            )
+        )
+    elif action == 'post_clear':
+        Comment.objects.filter(id=instance.id).update(
+            dislikes_count=Value(0)
+        )
 
 # 当 TopNote 新增或更新时，如果排名进入前 10 并且笔记未标记过优质，则标记并奖励。
 @receiver(post_save, sender=TopNote)

@@ -27,12 +27,12 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
+SECRET_KEY = 'django-insecure-$cjwom+ue1_w@m$514zvtkk9wxu3z01phdwcapxj04*+-jl&r@'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['10.29.47.122', '10.29.118.199', '127.0.0.1', 'localhost']
+ALLOWED_HOSTS = ['*', '172.20.192.71', '47.93.156.72', '127.0.0.1', 'localhost']
 
 # 加载环境变量
 load_dotenv()
@@ -254,7 +254,7 @@ DEFAULT_FROM_EMAIL = os.getenv('QQ_EMAIL')  # 默认发件人
 #session设置
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_NAME = 'sessionid'
-SESSION_COOKIE_SECURE = True  # if using HTTPS
+SESSION_COOKIE_SECURE = False  # if using HTTPS
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 # CKEditor配置
@@ -433,4 +433,5 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
-FFMPEG_PATH = r"E:\ffmpeg-7.1.1-full_build-shared\bin\ffmpeg.exe"
+FFMPEG_PATH = r"\www\wwwroot\ffmpeg-7.1.1-full_build-shared\bin\ffmpeg.exe"
+DATA_UPLOAD_MAX_MEMORY_SIZE = 104857600  # 100MB（单位：字节），你可以根据需要设成更大

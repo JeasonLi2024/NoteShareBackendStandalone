@@ -6,7 +6,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         User = get_user_model()
-        count = 50  # 写死
+        count = 1000  # 写死
         password = 'loadtestpass'
 
         for i in range(1, count + 1):

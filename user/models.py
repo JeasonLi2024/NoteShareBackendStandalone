@@ -19,7 +19,7 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractBaseUser, PermissionsMixin):
-    username = models.CharField(max_length=10, unique=True)
+    username = models.CharField(max_length=20, unique=True)
     phone = models.CharField(max_length=11, unique=True, verbose_name='手机号')
     avatar = models.ImageField(upload_to='avatars/', null=True, blank=True, verbose_name='头像')
     def save(self, *args, **kwargs):

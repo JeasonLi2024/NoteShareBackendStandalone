@@ -126,8 +126,18 @@ class DraftNoteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DraftNote
-        fields = '__all__'
+        fields = ['id', 'title', 'content', 'category', 'body', 'draft_files', 'cover_options', 'author', 'draft_images']
         read_only_fields = ['author', 'created_at', 'updated_at', 'last_modified', 'generated_covers']
+
+    def validate_title(self, value):
+        if len(value) < 5:
+            raise serializers.ValidationError("标题至少需要5个字符")
+        return value
+
+    def validate_content(self, value):
+        if len(value) < 10:
+            raise serializers.ValidationError("内容概要至少需要10个字符")
+        return value
 
     def get_cover_options(self, obj):
         req = self.context['request']
@@ -180,7 +190,7 @@ class NoteSerializer(serializers.ModelSerializer):
 
     def validate_content(self, value):
         if len(value) < 10:
-            raise serializers.ValidationError("内容至少需要10个字符")
+            raise serializers.ValidationError("内容概要至少需要10个字符")
         return value
 
     def get_share_link(self, obj):
